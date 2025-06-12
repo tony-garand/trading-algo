@@ -1,0 +1,53 @@
+{
+  "name": "options-strategy-analyzer",
+  "version": "1.0.0",
+  "description": "Advanced options trading strategy analyzer with technical analysis and volatility optimization",
+  "main": "dist/options-strategy-analyzer.js",
+  "types": "dist/options-strategy-analyzer.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/strategy-runner.ts",
+    "start": "node dist/strategy-runner.js",
+    "analyze": "ts-node src/strategy-runner.ts",
+    "test": "npm run build && npm run backtest",
+    "backtest": "npm run analyze backtest",
+    "watch": "tsc --watch",
+    "clean": "rm -rf dist",
+    "strategy": "ts-node src/get-daily-strategy.ts"
+  },
+  "keywords": [
+    "options",
+    "trading",
+    "strategy",
+    "technical-analysis",
+    "volatility",
+    "spreads",
+    "iron-condor",
+    "typescript"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "ts-node": "^10.9.2",
+    "tslib": "^2.8.1",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "inquirer": "^8.2.4",
+    "moment": "^2.29.4"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/options-strategy-analyzer.git"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ]
+}
