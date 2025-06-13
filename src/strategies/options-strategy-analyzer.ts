@@ -20,6 +20,7 @@ export interface StrategyParameters {
   targetCredit: number;
   maxLoss: number;
   maxProfit: number;
+  maxReturnOnRisk: number;
   daysToExpiration: number;
   expiryDate: Date;
   breakevenPrice: number;
@@ -214,7 +215,6 @@ export class OptionsStrategyAnalyzer {
       if (!optionsData?.strikes?.put || !optionsData?.strikes?.call) {
         throw new Error('No valid options data available');
       }
-      console.log(optionsData);
 
       // Get the expiry date from the options data
       const expiryDate = new Date(optionsData.options[0].expirationDate * 1000);
@@ -222,47 +222,6 @@ export class OptionsStrategyAnalyzer {
       // Calculate actual days to expiration
       const today = new Date();
       const daysToExpiration = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-
-      // Log market conditions
-      console.log('Market Conditions:', {
-        currentPrice,
-        vix,
-        ivPercentile,
-        vixAdjustment: VolatilityAnalysis.calculateVixAdjustment(vix),
-        ivPercentileAdjustment: VolatilityAnalysis.calculateIVPercentileAdjustment(ivPercentile)
-      });
-
-      // Log example of raw option data structure
-      const exampleCall = Object.values(optionsData.strikes.call)[0];
-      const examplePut = Object.values(optionsData.strikes.put)[0];
-      console.log('Example Raw Option Data Structure:', {
-        call: {
-          strike: exampleCall.strike,
-          lastPrice: exampleCall.lastPrice,
-          bid: exampleCall.bid,
-          ask: exampleCall.ask,
-          volume: exampleCall.volume,
-          openInterest: exampleCall.openInterest,
-          impliedVolatility: exampleCall.impliedVolatility,
-          delta: exampleCall.delta,
-          gamma: exampleCall.gamma,
-          theta: exampleCall.theta,
-          vega: exampleCall.vega
-        },
-        put: {
-          strike: examplePut.strike,
-          lastPrice: examplePut.lastPrice,
-          bid: examplePut.bid,
-          ask: examplePut.ask,
-          volume: examplePut.volume,
-          openInterest: examplePut.openInterest,
-          impliedVolatility: examplePut.impliedVolatility,
-          delta: examplePut.delta,
-          gamma: examplePut.gamma,
-          theta: examplePut.theta,
-          vega: examplePut.vega
-        }
-      });
 
       // Get available strikes
       const putStrikes = Object.keys(optionsData.strikes.put).map(Number).sort((a, b) => a - b);
@@ -278,15 +237,9 @@ export class OptionsStrategyAnalyzer {
       let maxLoss: number;
       let probabilityOfProfit: number;
 
-      // Adjust strike distances based on VIX and IV percentile
-      const vixAdjustment = VolatilityAnalysis.calculateVixAdjustment(vix);
-      const ivPercentileAdjustment = VolatilityAnalysis.calculateIVPercentileAdjustment(ivPercentile);
-      const totalVolAdjustment = vixAdjustment * ivPercentileAdjustment;
-
       switch (strategy) {
         case 'BULL_PUT_SPREAD': {
           // For bull put spread, we want to sell a put at a higher strike and buy a put at a lower strike
-          // Example: Sell $592 Put, Buy $580 Put
           const targetSellStrike = Math.round(currentPrice * 0.98); // 2% OTM
           const targetBuyStrike = Math.round(currentPrice * 0.96); // 4% OTM
           
@@ -298,7 +251,7 @@ export class OptionsStrategyAnalyzer {
             Math.abs(curr - targetBuyStrike) < Math.abs(prev - targetBuyStrike) ? curr : prev
           );
 
-          // Get actual option prices from OptionsService
+          // Get actual option prices
           const sellPut = optionsData.strikes.put[sellStrike];
           const buyPut = optionsData.strikes.put[buyStrike];
 
@@ -306,23 +259,14 @@ export class OptionsStrategyAnalyzer {
             throw new Error('Could not find option prices for selected strikes');
           }
 
-          // Log raw option data for debugging
-          console.log('Raw Option Data:', {
-            sellPut,
-            buyPut
-          });
-
-          // Calculate actual credit and max loss using last prices
-          // For 100 contracts (standard options contract size)
-          const sellPutPrice = sellPut.lastPrice * 100;
-          const buyPutPrice = buyPut.lastPrice * 100;
-          targetCredit = sellPutPrice - buyPutPrice; // Net credit received
-          maxLoss = (sellStrike - buyStrike) * 100 - targetCredit; // Maximum loss = width of spread - credit received
+          // Calculate actual credit and max loss
+          targetCredit = sellPut.lastPrice - buyPut.lastPrice;
+          maxLoss = (sellStrike - buyStrike) - targetCredit;
 
           // Calculate breakeven price
-          const breakevenPrice = sellStrike - (targetCredit / 100);
+          const breakevenPrice = sellStrike - targetCredit;
 
-          // Calculate probability of profit using 30-day implied volatility
+          // Calculate probability of profit
           probabilityOfProfit = TechnicalAnalysis.calculateProbabilityOfProfit(
             currentPrice,
             sellStrike,
@@ -333,41 +277,30 @@ export class OptionsStrategyAnalyzer {
             marketData
           );
 
-          // Log the actual values for debugging
-          console.log('Bull Put Spread Details:', {
-            currentPrice,
-            vix,
-            ivPercentile,
-            vixAdjustment,
-            ivPercentileAdjustment,
-            totalVolAdjustment,
-            sellStrike,
-            buyStrike,
-            sellPutPrice,
-            buyPutPrice,
-            targetCredit,
-            maxLoss,
-            breakevenPrice,
-            probabilityOfProfit,
-            sellPutIV: sellPut.impliedVolatility,
-            buyPutIV: buyPut.impliedVolatility,
-            daysToExpiration
-          });
+          // Calculate max profit and return on risk
+          const maxProfit = targetCredit;
+          const maxReturnOnRisk = (maxProfit / maxLoss) * 100;
 
-          return {
+          const parameters: StrategyParameters = {
             strategy,
             buyStrike,
             sellStrike,
-            buyOptionType: 'PUT',
-            sellOptionType: 'PUT',
+            buyOptionType: 'PUT' as const,
+            sellOptionType: 'PUT' as const,
             targetCredit,
             maxLoss,
-            maxProfit: targetCredit,
+            maxProfit,
+            maxReturnOnRisk,
             daysToExpiration,
             expiryDate,
             breakevenPrice,
             probabilityOfProfit
           };
+
+          // Log the parameters for debugging
+          console.log('Bull Put Spread Parameters:', parameters);
+
+          return parameters;
         }
 
         case 'BEAR_CALL_SPREAD': {
@@ -392,11 +325,13 @@ export class OptionsStrategyAnalyzer {
           }
 
           // Calculate actual credit and max loss
-          targetCredit = sellCall.bid - buyCall.ask;
-          maxLoss = buyStrike - sellStrike - targetCredit;
+          targetCredit = sellCall.lastPrice - buyCall.lastPrice;
+          maxLoss = (buyStrike - sellStrike) - targetCredit;
 
-          // Calculate probability of profit using implied volatility
-          const bearCallBreakevenPrice = sellStrike + targetCredit;
+          // Calculate breakeven price
+          const breakevenPrice = sellStrike + targetCredit;
+
+          // Calculate probability of profit
           probabilityOfProfit = TechnicalAnalysis.calculateProbabilityOfProfit(
             currentPrice,
             sellStrike,
@@ -407,20 +342,30 @@ export class OptionsStrategyAnalyzer {
             marketData
           );
 
-          return {
+          // Calculate max profit and return on risk
+          const maxProfit = targetCredit;
+          const maxReturnOnRisk = (maxProfit / maxLoss) * 100;
+
+          const parameters: StrategyParameters = {
             strategy,
             buyStrike,
             sellStrike,
-            buyOptionType: 'CALL',
-            sellOptionType: 'CALL',
+            buyOptionType: 'CALL' as const,
+            sellOptionType: 'CALL' as const,
             targetCredit,
             maxLoss,
-            maxProfit: targetCredit,
+            maxProfit,
+            maxReturnOnRisk,
             daysToExpiration,
             expiryDate,
-            breakevenPrice: bearCallBreakevenPrice,
+            breakevenPrice,
             probabilityOfProfit
           };
+
+          // Log the parameters for debugging
+          console.log('Bear Call Spread Parameters:', parameters);
+
+          return parameters;
         }
 
         case 'IRON_CONDOR': {
@@ -449,14 +394,15 @@ export class OptionsStrategyAnalyzer {
           }
 
           // Calculate actual credit and max loss
-          const putCredit = putSell.bid - putBuy.ask;
-          const callCredit = callSell.bid - callBuy.ask;
+          const putCredit = putSell.lastPrice - putBuy.lastPrice;
+          const callCredit = callSell.lastPrice - callBuy.lastPrice;
           targetCredit = putCredit + callCredit;
           maxLoss = Math.max(putSellStrike - putBuyStrike, callBuyStrike - callSellStrike) - targetCredit;
 
-          // Calculate probability of profit using implied volatility
-          const ironCondorPutBreakeven = putSellStrike - putCredit;
+          // Calculate breakeven price
+          const breakevenPrice = putSellStrike - putCredit;
 
+          // Calculate probability of profit
           probabilityOfProfit = TechnicalAnalysis.calculateProbabilityOfProfit(
             currentPrice,
             putSellStrike,
@@ -467,20 +413,30 @@ export class OptionsStrategyAnalyzer {
             marketData
           );
 
-          return {
+          // Calculate max profit and return on risk
+          const maxProfit = targetCredit;
+          const maxReturnOnRisk = (maxProfit / maxLoss) * 100;
+
+          const parameters: StrategyParameters = {
             strategy,
             buyStrike: putBuyStrike,
             sellStrike: putSellStrike,
-            buyOptionType: 'PUT',
-            sellOptionType: 'PUT',
+            buyOptionType: 'PUT' as const,
+            sellOptionType: 'PUT' as const,
             targetCredit,
             maxLoss,
-            maxProfit: targetCredit,
+            maxProfit,
+            maxReturnOnRisk,
             daysToExpiration,
             expiryDate,
-            breakevenPrice: ironCondorPutBreakeven,
+            breakevenPrice,
             probabilityOfProfit
           };
+
+          // Log the parameters for debugging
+          console.log('Iron Condor Parameters:', parameters);
+
+          return parameters;
         }
 
         default:
@@ -502,30 +458,58 @@ export class OptionsStrategyAnalyzer {
   /**
    * Get formatted recommendation string
    */
-  public getFormattedRecommendation(recommendation: StrategyRecommendation): string {
-    return `
-Strategy: ${recommendation.strategy}
-Position Size: $${recommendation.positionSize.toFixed(2)}
-Expected Win Rate: ${recommendation.expectedWinRate}%
-Risk Level: ${recommendation.riskLevel}
-Signal Strength: ${recommendation.signalStrength.toFixed(1)}/5
-Max Risk: $${recommendation.maxRisk.toFixed(2)}
+  private getFormattedRecommendation(recommendation: StrategyRecommendation): string {
+    const {
+      strategy,
+      parameters,
+      reasoning,
+      riskLevel,
+      signalStrength,
+      positionSize,
+      expectedWinRate,
+      maxRisk
+    } = recommendation;
 
-Reasoning:
-${recommendation.reasoning}
+    // Log the values for debugging
+    console.log('Strategy Parameters in getFormattedRecommendation:', {
+      targetCredit: parameters.targetCredit,
+      maxProfit: parameters.maxProfit,
+      maxLoss: parameters.maxLoss,
+      maxReturnOnRisk: parameters.maxReturnOnRisk
+    });
+
+    const output = `
+Strategy: ${strategy}
+Position Size: $${positionSize.toFixed(2)}
+Expected Win Rate: ${expectedWinRate}%
+Risk Level: ${riskLevel}
+Signal Strength: ${signalStrength.toFixed(1)}/5
+Max Risk: $${maxRisk.toFixed(2)}
 
 Strategy Parameters:
-- Target Credit: $${recommendation.parameters.targetCredit.toFixed(2)}
-- Max Profit: $${recommendation.parameters.maxProfit.toFixed(2)}
-- Max Loss: $${recommendation.parameters.maxLoss.toFixed(2)}
-- Risk/Profit Ratio: ${(recommendation.parameters.maxProfit / recommendation.parameters.maxLoss).toFixed(2)}
-- Days to Expiration: ${recommendation.parameters.daysToExpiration}
-- Expiry Date: ${this.formatExpiryDate(recommendation.parameters.expiryDate)}
-- Breakeven Price: $${recommendation.parameters.breakevenPrice.toFixed(2)}
-- Probability of Profit: ${recommendation.parameters.probabilityOfProfit}%
-${recommendation.parameters.buyStrike ? `- Buy ${recommendation.parameters.buyOptionType} Strike: $${recommendation.parameters.buyStrike}` : ''}
-${recommendation.parameters.sellStrike ? `- Sell ${recommendation.parameters.sellOptionType} Strike: $${recommendation.parameters.sellStrike}` : ''}
+- Target Credit: $${parameters.targetCredit.toFixed(2)}
+- Max Profit: $${parameters.maxProfit.toFixed(2)}
+- Max Loss: $${parameters.maxLoss.toFixed(2)}
+- Risk/Profit Ratio: ${(parameters.maxProfit / parameters.maxLoss).toFixed(2)}
+- Max Return on Risk: ${parameters.maxReturnOnRisk.toFixed(1)}%
+
+Strike Prices:
+- Sell ${parameters.sellOptionType} at $${parameters.sellStrike}
+- Buy ${parameters.buyOptionType} at $${parameters.buyStrike}
+- Breakeven Price: $${parameters.breakevenPrice.toFixed(2)}
+
+Expiration:
+- Days to Expiration: ${parameters.daysToExpiration}
+- Expiry Date: ${parameters.expiryDate.toLocaleDateString()}
+
+Reasoning:
+${reasoning}
 `;
+
+    // Log the final output for debugging
+    console.log('Final Output:', output);
+
+    return output;
   }
 
   private formatExpiryDate(expiryDate: Date): string {
