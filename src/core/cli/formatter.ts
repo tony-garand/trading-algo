@@ -38,7 +38,10 @@ export class CLIFormatter {
     const params = recommendation.parameters;
     const metrics = [
       ['Target Credit', formatMetricValue('TARGET_CREDIT', params.targetCredit)],
+      ['Max Profit', formatMetricValue('MAX_LOSS', params.maxProfit)],
       ['Max Loss', formatMetricValue('MAX_LOSS', params.maxLoss)],
+      ['Risk/Profit Ratio', (params.maxProfit / params.maxLoss).toFixed(2)],
+      ['Max Return on Risk', `${params.maxReturnOnRisk.toFixed(1)}%`],
       ['Days to Expiration', params.daysToExpiration],
       ['Expiry Date', params.expiryDate.toISOString().split('T')[0]],
       ['Breakeven Price', formatMetricValue('BREAKEVEN_PRICE', params.breakevenPrice)],

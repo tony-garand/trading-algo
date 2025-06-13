@@ -170,44 +170,58 @@ export class TechnicalAnalysis {
    * @returns Signal strength from 1-5
    */
   static calculateSignalStrength(data: MarketData): number {
-    const volatilityAdjustment = VolatilityAnalysis.calculateVolatilityAdjustment(data.vix, data.ivPercentile);
     const volatilityRegime = VolatilityAnalysis.getVolatilityRegime(data.vix, data.ivPercentile);
     
-    // Base signal strength on technical indicators
-    let strength = 0;
+    // Calculate base strength from technical indicators
+    let bullishSignals = 0;
+    let bearishSignals = 0;
     
     // Price relative to moving averages
-    if (data.price > data.sma50) strength += 1;
-    if (data.price > data.sma200) strength += 1;
+    if (data.price > data.sma50) bullishSignals += 1;
+    if (data.price < data.sma50) bearishSignals += 1;
+    if (data.price > data.sma200) bullishSignals += 1;
+    if (data.price < data.sma200) bearishSignals += 1;
     
-    // RSI conditions
-    if (data.rsi > 50) strength += 1;
-    if (data.rsi > 60) strength += 1;
+    // RSI conditions with overbought/oversold consideration
+    if (data.rsi > 50 && data.rsi < 70) bullishSignals += 1;
+    if (data.rsi < 50 && data.rsi > 30) bearishSignals += 1;
+    if (data.rsi > 60 && data.rsi < 70) bullishSignals += 1;
+    if (data.rsi < 40 && data.rsi > 30) bearishSignals += 1;
+    
+    // Add bearish signals for overbought conditions
+    if (data.rsi >= 70) bearishSignals += 2;
+    // Add bullish signals for oversold conditions
+    if (data.rsi <= 30) bullishSignals += 2;
     
     // MACD
-    if (data.macd > 0) strength += 1;
+    if (data.macd > 0) bullishSignals += 1;
+    if (data.macd < 0) bearishSignals += 1;
     
     // ADX trend strength
-    if (data.adx > 25) strength += 1;
+    if (data.adx > 25) {
+      if (data.plusDI > data.minusDI) bullishSignals += 1;
+      if (data.minusDI > data.plusDI) bearishSignals += 1;
+    }
+    
+    // Calculate net strength (-5 to 5)
+    let netStrength = bullishSignals - bearishSignals;
     
     // Adjust for volatility regime
     switch (volatilityRegime) {
       case 'high':
-        strength *= 0.8; // Reduce signal strength in high volatility
+        netStrength *= 0.8; // Reduce signal strength in high volatility
         break;
       case 'low':
-        strength *= 1.2; // Increase signal strength in low volatility
+        netStrength *= 1.2; // Increase signal strength in low volatility
         break;
       default:
         // No adjustment for medium volatility
         break;
     }
     
-    // Apply volatility adjustment
-    strength *= volatilityAdjustment;
-    
     // Normalize to 1-5 scale
-    return Math.max(1, Math.min(5, Math.round(strength)));
+    // Convert -5 to 5 range to 1 to 5 range
+    return Math.max(1, Math.min(5, Math.round((netStrength + 5) / 2)));
   }
 
   /**
@@ -409,7 +423,7 @@ export class TechnicalAnalysis {
       baseWinRate += 0.05;
     }
 
-    return Math.min(1, baseWinRate);
+    return baseWinRate * 100;
   }
 
   /**

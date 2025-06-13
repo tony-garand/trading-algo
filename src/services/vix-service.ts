@@ -2,7 +2,7 @@ import { Logger } from '../core/logger';
 
 export class VIXService {
   private logger: Logger;
-  private static readonly VIX_API = 'https://query1.finance.com/v8/finance/chart/%5EVIX';
+  private static readonly VIX_API = 'https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX';
 
   constructor() {
     this.logger = Logger.getInstance();
@@ -10,6 +10,7 @@ export class VIXService {
 
   /**
    * Fetch current VIX value
+   * @throws Error if VIX data cannot be fetched or is invalid
    */
   public async fetchVIX(): Promise<number> {
     try {
@@ -18,15 +19,23 @@ export class VIXService {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const data = await response.json();
-      return data.chart.result[0].indicators.quote[0].close[0];
+      
+      // Check if we have valid data structure
+      if (!data?.chart?.result?.[0]?.meta?.regularMarketPrice) {
+        throw new Error('Invalid VIX data structure received');
+      }
+
+      // Use regularMarketPrice as it's more reliable than quote data
+      return data.chart.result[0].meta.regularMarketPrice;
     } catch (error) {
       this.logger.error('Error fetching VIX:', error as Error);
-      return 20; // Default value
+      throw error; // Re-throw the error instead of returning a default value
     }
   }
 
   /**
    * Calculate IV Percentile using VIX data
+   * @throws Error if VIX data cannot be fetched or is invalid
    */
   public async calculateIVPercentile(): Promise<number> {
     try {
@@ -36,6 +45,12 @@ export class VIXService {
       }
       
       const data = await response.json();
+      
+      // Check if we have valid data structure
+      if (!data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close) {
+        throw new Error('Invalid VIX data structure received');
+      }
+
       const vixData = data.chart.result[0].indicators.quote[0].close;
       const validVIX = vixData.filter((v: number | null) => v !== null && v !== undefined);
       
@@ -57,7 +72,7 @@ export class VIXService {
       return (count / sortedVIX.length) * 100;
     } catch (error) {
       this.logger.error('Error calculating IV percentile:', error as Error);
-      return 50; // Default value for error cases
+      throw error; // Re-throw the error instead of returning a default value
     }
   }
 } 
