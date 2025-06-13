@@ -402,7 +402,6 @@ export class OptionsStrategyAnalyzer {
           // Calculate breakeven price
           const breakevenPrice = putSellStrike - putCredit;
 
-          // Calculate probability of profit
           probabilityOfProfit = TechnicalAnalysis.calculateProbabilityOfProfit(
             currentPrice,
             putSellStrike,
