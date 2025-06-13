@@ -409,7 +409,7 @@ export class TechnicalAnalysis {
       baseWinRate += 0.05;
     }
 
-    return Math.min(1, baseWinRate);
+    return baseWinRate * 100;
   }
 
   /**
