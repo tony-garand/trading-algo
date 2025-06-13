@@ -19,6 +19,7 @@ export interface StrategyParameters {
   sellOptionType?: 'PUT' | 'CALL';
   targetCredit: number;
   maxLoss: number;
+  maxProfit: number;
   daysToExpiration: number;
   expiryDate: Date;
   breakevenPrice: number;
@@ -361,6 +362,7 @@ export class OptionsStrategyAnalyzer {
             sellOptionType: 'PUT',
             targetCredit,
             maxLoss,
+            maxProfit: targetCredit,
             daysToExpiration,
             expiryDate,
             breakevenPrice,
@@ -413,6 +415,7 @@ export class OptionsStrategyAnalyzer {
             sellOptionType: 'CALL',
             targetCredit,
             maxLoss,
+            maxProfit: targetCredit,
             daysToExpiration,
             expiryDate,
             breakevenPrice: bearCallBreakevenPrice,
@@ -472,6 +475,7 @@ export class OptionsStrategyAnalyzer {
             sellOptionType: 'PUT',
             targetCredit,
             maxLoss,
+            maxProfit: targetCredit,
             daysToExpiration,
             expiryDate,
             breakevenPrice: ironCondorPutBreakeven,
@@ -512,7 +516,9 @@ ${recommendation.reasoning}
 
 Strategy Parameters:
 - Target Credit: $${recommendation.parameters.targetCredit.toFixed(2)}
+- Max Profit: $${recommendation.parameters.maxProfit.toFixed(2)}
 - Max Loss: $${recommendation.parameters.maxLoss.toFixed(2)}
+- Risk/Profit Ratio: ${(recommendation.parameters.maxProfit / recommendation.parameters.maxLoss).toFixed(2)}
 - Days to Expiration: ${recommendation.parameters.daysToExpiration}
 - Expiry Date: ${this.formatExpiryDate(recommendation.parameters.expiryDate)}
 - Breakeven Price: $${recommendation.parameters.breakevenPrice.toFixed(2)}
