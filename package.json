@@ -14,7 +14,8 @@
     "watch": "tsc --watch",
     "clean": "rm -rf dist",
     "strategy": "ts-node src/index.ts strategy",
-    "daily": "ts-node src/index.ts strategy"
+    "daily": "ts-node src/index.ts strategy",
+    "ask": "ts-node src/index.ts ask"
   },
   "keywords": [
     "options",

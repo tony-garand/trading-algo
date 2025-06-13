@@ -5,6 +5,7 @@ import { MarketData } from '../types';
 import { MarketDataService } from '../services/market-data-service';
 import { OptionsService } from '../services/options-service';
 import { format, toZonedTime } from 'date-fns-tz';
+import { TechnicalAnalysis } from '../utils/technical-analysis';
 
 interface TechnicalSignal {
   type: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
@@ -121,20 +122,40 @@ export class OptionsStrategyAnalyzer {
   private calculateSignalStrength(data: MarketData): number {
     let strength = 0;
 
-    // Moving Average Analysis (30%)
-    if (data.price > data.sma50) strength += 1.5;
-    if (data.price > data.sma200) strength += 1.5;
+    // Moving Average Analysis (25%)
+    if (data.price > data.sma50) strength += 1.25;
+    if (data.price > data.sma200) strength += 1.25;
 
-    // MACD Analysis (20%)
-    if (data.macd > 0) strength += 1;
+    // MACD Analysis (15%)
+    if (data.macd > 0) strength += 0.75;
 
-    // RSI Analysis (20%)
-    if (data.rsi < OptionsStrategyAnalyzer.RSI_THRESHOLDS.OVERSOLD) strength += 1;
-    if (data.rsi > OptionsStrategyAnalyzer.RSI_THRESHOLDS.OVERBOUGHT) strength -= 1;
+    // RSI Analysis (15%)
+    if (data.rsi < OptionsStrategyAnalyzer.RSI_THRESHOLDS.OVERSOLD) strength += 0.75;
+    if (data.rsi > OptionsStrategyAnalyzer.RSI_THRESHOLDS.OVERBOUGHT) strength -= 0.75;
 
-    // VIX Analysis (30%)
-    if (data.vix < OptionsStrategyAnalyzer.VIX_THRESHOLDS.LOW) strength += 1.5;
-    if (data.vix > OptionsStrategyAnalyzer.VIX_THRESHOLDS.HIGH) strength -= 1.5;
+    // VIX Analysis (15%)
+    if (data.vix < OptionsStrategyAnalyzer.VIX_THRESHOLDS.LOW) strength += 0.75;
+    if (data.vix > OptionsStrategyAnalyzer.VIX_THRESHOLDS.HIGH) strength -= 0.75;
+
+    // ADX Analysis (30%)
+    const adxInterpretation = TechnicalAnalysis.interpretADX(data.adx);
+    switch (adxInterpretation.strength) {
+      case 'VERY_STRONG':
+        strength += 1.5;
+        break;
+      case 'STRONG':
+        strength += 1.0;
+        break;
+      case 'MODERATE':
+        strength += 0.5;
+        break;
+      case 'WEAK':
+        strength -= 0.5;
+        break;
+      case 'VERY_WEAK':
+        strength -= 1.0;
+        break;
+    }
 
     return Math.max(0, Math.min(5, strength)); // Normalize to 0-5
   }
@@ -161,6 +182,17 @@ export class OptionsStrategyAnalyzer {
     // RSI
     if (data.rsi < OptionsStrategyAnalyzer.RSI_THRESHOLDS.OVERSOLD) signals.bullish++;
     if (data.rsi > OptionsStrategyAnalyzer.RSI_THRESHOLDS.OVERBOUGHT) signals.bearish++;
+
+    // ADX Directional Movement
+    if (data.plusDI > data.minusDI) signals.bullish++;
+    if (data.minusDI > data.plusDI) signals.bearish++;
+
+    // Weight ADX trend strength
+    const adxInterpretation = TechnicalAnalysis.interpretADX(data.adx);
+    if (adxInterpretation.strength === 'STRONG' || adxInterpretation.strength === 'VERY_STRONG') {
+      if (data.plusDI > data.minusDI) signals.bullish++;
+      if (data.minusDI > data.plusDI) signals.bearish++;
+    }
 
     if (signals.bullish > signals.bearish) return 'BULLISH';
     if (signals.bearish > signals.bullish) return 'BEARISH';

@@ -4,7 +4,7 @@ import { Logger } from '../core/logger';
 import { MarketDataError } from '../types/errors';
 import { TechnicalIndicatorsService } from './technical-indicators-service';
 import { VIXService } from './vix-service';
-import { OptionsService, OptionsData } from './options-service';
+import { OptionsService } from './options-service';
 
 export class MarketDataService {
   private config: ConfigService;
@@ -12,9 +12,6 @@ export class MarketDataService {
   private technicalIndicators: TechnicalIndicatorsService;
   private vixService: VIXService;
   private optionsService: OptionsService;
-  private static readonly YAHOO_FINANCE_API = 'https://query1.finance.yahoo.com/v8/finance/chart/SPY';
-  private lastRequestTime = 0;
-  private readonly MIN_REQUEST_INTERVAL = 5000; // 5 seconds between requests
 
   constructor() {
     this.config = ConfigService.getInstance();
@@ -100,15 +97,21 @@ export class MarketDataService {
         }))
       ];
 
+      const vix = await this.vixService.fetchVIX();
+      const ivPercentile = await this.vixService.calculateIVPercentile();
+      const adxResult = this.technicalIndicators.calculateADX(quote.high, quote.low, quote.close);
+
       const marketData: MarketData = {
         price: quote.close[lastIndex],
         sma50: sma50[sma50.length - 1],
         sma200: sma200[sma200.length - 1],
         macd: macd[macd.length - 1],
         rsi: rsi[rsi.length - 1],
-        vix: await this.vixService.fetchVIX(),
-        ivPercentile: await this.vixService.calculateIVPercentile(),
-        adx: this.technicalIndicators.calculateADX(quote.high, quote.low, quote.close),
+        vix,
+        ivPercentile,
+        adx: adxResult.adx,
+        plusDI: adxResult.plusDI,
+        minusDI: adxResult.minusDI,
         volume: quote.volume[lastIndex],
         date: new Date(timestamps[lastIndex] * 1000),
         optionsData: {
