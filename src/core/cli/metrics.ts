@@ -49,7 +49,7 @@ export const CLI_METRICS: { [key: string]: MetricDefinition } = {
   },
   PROBABILITY_OF_PROFIT: {
     name: 'Probability of Profit',
-    description: 'Theoretical probability of profit at expiration based on option Greeks',
+    description: 'Probability of returning at least $0.01 at the time of expiry.  This figure is derived from 30 day Implied Volatility.',
     format: 'percentage',
     category: 'PERFORMANCE'
   },

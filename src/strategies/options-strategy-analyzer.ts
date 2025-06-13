@@ -4,15 +4,12 @@
 import { MarketData } from '../types';
 import { MarketDataService } from '../services/market-data-service';
 import { OptionsService } from '../services/options-service';
+import { VIXService } from '../services/vix-service';
+import { RiskManager } from '../services/risk-manager';
+import { VolatilityAnalysis } from '../utils/volatility-analysis';
 import { format, toZonedTime } from 'date-fns-tz';
 import { TechnicalAnalysis } from '../utils/technical-analysis';
-
-interface TechnicalSignal {
-  type: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
-  strength: number; // 0-5 scale
-  description: string;
-  weight: number; // Importance of this signal
-}
+import { Logger } from '../core/logger';
 
 export interface StrategyParameters {
   strategy: string;
@@ -36,7 +33,7 @@ export interface StrategyRecommendation {
   expectedWinRate: number;
   signalStrength: number;
   maxRisk: number;
-  strategyParameters: StrategyParameters;
+  parameters: StrategyParameters;
 }
 
 interface AccountInfo {
@@ -63,149 +60,47 @@ export class OptionsStrategyAnalyzer {
   private readonly MAX_DAYS_TO_EXPIRATION = 30;
   private marketDataService: MarketDataService;
   private optionsService: OptionsService;
+  private vixService: VIXService;
+  private logger: Logger;
 
   constructor(accountInfo: AccountInfo) {
     this.accountInfo = accountInfo;
     this.marketDataService = new MarketDataService();
     this.optionsService = new OptionsService();
+    this.vixService = new VIXService();
+    this.logger = Logger.getInstance();
   }
 
   /**
-   * Get current strategy recommendation
+   * Get current recommendation based on market conditions
    */
-  public async getCurrentRecommendation(marketData: MarketData): Promise<StrategyRecommendation> {
+  async getCurrentRecommendation(): Promise<StrategyRecommendation> {
     try {
-      // Determine market bias and IV environment
-      const marketBias = this.determineMarketBias(marketData);
-      const ivEnvironment = this.determineIVEnvironment(marketData);
-
-      // Get signal strength
-      const signalStrength = this.calculateSignalStrength(marketData);
-
-      // Determine optimal strategy
-      const strategy = this.determineStrategy(marketData, marketBias, ivEnvironment);
-
-      // Get strategy parameters
-      const strategyParams = await this.getStrategyParameters(marketData, strategy);
-
-      // Calculate risk metrics
-      const riskMetrics = this.calculateRiskMetrics(marketData, strategy);
-
-      // Calculate expected win rate
-      const expectedWinRate = this.calculateExpectedWinRate(marketData, strategy);
-
-      // Calculate position size
-      const positionSize = this.calculatePositionSize(marketData, strategyParams, riskMetrics);
-
-      // Generate reasoning
-      const reasoning = this.generateReasoning(marketData, marketBias, ivEnvironment);
+      const data = await this.marketDataService.fetchCurrentMarketData();
+      const marketBias = TechnicalAnalysis.determineMarketBias(data);
+      const ivEnvironment = VolatilityAnalysis.determineIVEnvironment(data.vix);
+      const strategy = this.determineStrategy(data, marketBias, ivEnvironment);
+      const parameters = await this.getStrategyParameters(data, strategy);
+      const riskMetrics = RiskManager.calculateRiskMetrics(data, this.accountInfo.balance);
+      const positionSize = Math.min(riskMetrics.maxPositionSize, this.accountInfo.balance * 0.08); // 8% of account balance
+      const signalStrength = TechnicalAnalysis.calculateSignalStrength(data);
+      const expectedWinRate = TechnicalAnalysis.calculateExpectedWinRate(data, strategy, parameters.daysToExpiration);
+      const riskLevel = this.determineRiskLevel(data);
 
       return {
         strategy,
         positionSize,
-        riskLevel: this.determineRiskLevel(marketData),
-        expectedWinRate: expectedWinRate,
+        expectedWinRate,
+        riskLevel,
         signalStrength,
         maxRisk: riskMetrics.maxRisk,
-        reasoning,
-        strategyParameters: strategyParams
+        reasoning: this.generateReasoning(data, strategy, marketBias, ivEnvironment),
+        parameters
       };
     } catch (error) {
-      console.error('Error getting strategy recommendation:', error);
+      this.logger.error('Error getting current recommendation:', error as Error);
       throw error;
     }
-  }
-
-  /**
-   * Calculate signal strength based on technical indicators
-   */
-  private calculateSignalStrength(data: MarketData): number {
-    let strength = 0;
-
-    // Moving Average Analysis (25%)
-    if (data.price > data.sma50) strength += 1.25;
-    if (data.price > data.sma200) strength += 1.25;
-
-    // MACD Analysis (15%)
-    if (data.macd > 0) strength += 0.75;
-
-    // RSI Analysis (15%)
-    if (data.rsi < OptionsStrategyAnalyzer.RSI_THRESHOLDS.OVERSOLD) strength += 0.75;
-    if (data.rsi > OptionsStrategyAnalyzer.RSI_THRESHOLDS.OVERBOUGHT) strength -= 0.75;
-
-    // VIX Analysis (15%)
-    if (data.vix < OptionsStrategyAnalyzer.VIX_THRESHOLDS.LOW) strength += 0.75;
-    if (data.vix > OptionsStrategyAnalyzer.VIX_THRESHOLDS.HIGH) strength -= 0.75;
-
-    // ADX Analysis (30%)
-    const adxInterpretation = TechnicalAnalysis.interpretADX(data.adx);
-    switch (adxInterpretation.strength) {
-      case 'VERY_STRONG':
-        strength += 1.5;
-        break;
-      case 'STRONG':
-        strength += 1.0;
-        break;
-      case 'MODERATE':
-        strength += 0.5;
-        break;
-      case 'WEAK':
-        strength -= 0.5;
-        break;
-      case 'VERY_WEAK':
-        strength -= 1.0;
-        break;
-    }
-
-    return Math.max(0, Math.min(5, strength)); // Normalize to 0-5
-  }
-
-  /**
-   * Determine market bias based on technical indicators
-   */
-  private determineMarketBias(data: MarketData): 'BULLISH' | 'BEARISH' | 'NEUTRAL' {
-    const signals = {
-      bullish: 0,
-      bearish: 0
-    };
-
-    // Price vs Moving Averages
-    if (data.price > data.sma50) signals.bullish++;
-    if (data.price > data.sma200) signals.bullish++;
-    if (data.price < data.sma50) signals.bearish++;
-    if (data.price < data.sma200) signals.bearish++;
-
-    // MACD
-    if (data.macd > 0) signals.bullish++;
-    if (data.macd < 0) signals.bearish++;
-
-    // RSI
-    if (data.rsi < OptionsStrategyAnalyzer.RSI_THRESHOLDS.OVERSOLD) signals.bullish++;
-    if (data.rsi > OptionsStrategyAnalyzer.RSI_THRESHOLDS.OVERBOUGHT) signals.bearish++;
-
-    // ADX Directional Movement
-    if (data.plusDI > data.minusDI) signals.bullish++;
-    if (data.minusDI > data.plusDI) signals.bearish++;
-
-    // Weight ADX trend strength
-    const adxInterpretation = TechnicalAnalysis.interpretADX(data.adx);
-    if (adxInterpretation.strength === 'STRONG' || adxInterpretation.strength === 'VERY_STRONG') {
-      if (data.plusDI > data.minusDI) signals.bullish++;
-      if (data.minusDI > data.plusDI) signals.bearish++;
-    }
-
-    if (signals.bullish > signals.bearish) return 'BULLISH';
-    if (signals.bearish > signals.bullish) return 'BEARISH';
-    return 'NEUTRAL';
-  }
-
-  /**
-   * Determine IV environment based on VIX
-   */
-  private determineIVEnvironment(data: MarketData): 'LOW' | 'MEDIUM' | 'HIGH' {
-    if (data.vix < OptionsStrategyAnalyzer.VIX_THRESHOLDS.LOW) return 'LOW';
-    if (data.vix > OptionsStrategyAnalyzer.VIX_THRESHOLDS.HIGH) return 'HIGH';
-    return 'MEDIUM';
   }
 
   /**
@@ -216,6 +111,18 @@ export class OptionsStrategyAnalyzer {
     marketBias: 'BULLISH' | 'BEARISH' | 'NEUTRAL',
     ivEnvironment: 'LOW' | 'MEDIUM' | 'HIGH'
   ): string {
+    const volatilityRegime = VolatilityAnalysis.getVolatilityRegime(data.vix, data.ivPercentile);
+    
+    // Log strategy determination factors
+    console.log('Strategy Determination:', {
+      marketBias,
+      ivEnvironment,
+      volatilityRegime,
+      vix: data.vix,
+      ivPercentile: data.ivPercentile,
+      volatilityAdjustment: VolatilityAnalysis.calculateVolatilityAdjustment(data.vix, data.ivPercentile)
+    });
+
     // High IV Environment
     if (ivEnvironment === 'HIGH') {
       if (marketBias === 'BULLISH') return 'BULL_PUT_SPREAD';
@@ -237,47 +144,12 @@ export class OptionsStrategyAnalyzer {
   }
 
   /**
-   * Calculate position size based on signal strength and account info
-   */
-  private calculatePositionSize(data: MarketData, strategyParams: StrategyParameters, riskMetrics: { maxRisk: number }): number {
-    const baseSize = this.accountInfo.balance * this.accountInfo.maxRiskPerTrade;
-    const vixAdjustment = data.vix > OptionsStrategyAnalyzer.VIX_THRESHOLDS.HIGH ? 0.7 : 1;
-    const drawdownAdjustment = this.accountInfo.currentDrawdown > 10 ? 0.5 : 1;
-    const expectedWinRate = this.calculateExpectedWinRate(data, strategyParams.strategy);
-
-    return baseSize * (expectedWinRate / 100) * vixAdjustment * drawdownAdjustment;
-  }
-
-  /**
-   * Calculate risk metrics for the strategy
-   */
-  private calculateRiskMetrics(data: MarketData, strategy: string): { maxRisk: number } {
-    const baseRisk = this.accountInfo.balance * this.accountInfo.maxRiskPerTrade;
-    const vixAdjustment = data.vix > OptionsStrategyAnalyzer.VIX_THRESHOLDS.HIGH ? 0.7 : 1;
-
-    return {
-      maxRisk: baseRisk * vixAdjustment
-    };
-  }
-
-  /**
    * Determine risk level based on market conditions
    */
   private determineRiskLevel(data: MarketData): 'LOW' | 'MEDIUM' | 'HIGH' {
-    if (data.vix > OptionsStrategyAnalyzer.VIX_THRESHOLDS.HIGH) return 'HIGH';
-    if (data.vix < OptionsStrategyAnalyzer.VIX_THRESHOLDS.LOW) return 'LOW';
+    if (data.vix > VolatilityAnalysis.VIX_THRESHOLDS.HIGH) return 'HIGH';
+    if (data.vix < VolatilityAnalysis.VIX_THRESHOLDS.LOW) return 'LOW';
     return 'MEDIUM';
-  }
-
-  /**
-   * Calculate expected win rate based on strategy and market conditions
-   */
-  private calculateExpectedWinRate(data: MarketData, strategy: string): number {
-    const baseWinRate = 0.65; // Base win rate for all strategies
-    const vixAdjustment = data.vix > OptionsStrategyAnalyzer.VIX_THRESHOLDS.HIGH ? 0.1 : 0;
-    const rsiAdjustment = Math.abs(data.rsi - 50) / 50 * 0.1;
-
-    return Math.min(0.85, baseWinRate + vixAdjustment + rsiAdjustment);
   }
 
   /**
@@ -285,6 +157,7 @@ export class OptionsStrategyAnalyzer {
    */
   private generateReasoning(
     data: MarketData,
+    strategy: string,
     marketBias: 'BULLISH' | 'BEARISH' | 'NEUTRAL',
     ivEnvironment: 'LOW' | 'MEDIUM' | 'HIGH'
   ): string {
@@ -326,51 +199,97 @@ export class OptionsStrategyAnalyzer {
     const ivPercentile = marketData.ivPercentile;
     const vix = marketData.vix;
 
-    // Get options data for the target DTE range
-    let daysToExpiration = marketData.optionsData?.daysToExpiration || 25; // Default to 25 if not available
-    let expiryDate = marketData.optionsData?.expiryDate || new Date();
-
-    // Enforce DTE requirements
-    if (daysToExpiration < this.MIN_DAYS_TO_EXPIRATION || daysToExpiration > this.MAX_DAYS_TO_EXPIRATION) {
-      daysToExpiration = this.MIN_DAYS_TO_EXPIRATION;
-      expiryDate = new Date();
-      expiryDate.setDate(expiryDate.getDate() + daysToExpiration);
-    }
-
     try {
-      const optionsData = await this.optionsService.getOptionsDataForDaysToExpiry(daysToExpiration);
-      
-      if (!optionsData?.strikes?.put || Object.keys(optionsData.strikes.put).length === 0) {
-        throw new Error('No valid options data found');
+      // Get options data for 25 DTE
+      const optionsData = await this.optionsService.getOptionsDataForDaysToExpiry(25);
+      if (!optionsData?.strikes?.put || !optionsData?.strikes?.call) {
+        throw new Error('No valid options data available');
       }
+      console.log(optionsData);
+
+      // Get the expiry date from the options data
+      const expiryDate = new Date(optionsData.options[0].expirationDate * 1000);
+      
+      // Calculate actual days to expiration
+      const today = new Date();
+      const daysToExpiration = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+      // Log market conditions
+      console.log('Market Conditions:', {
+        currentPrice,
+        vix,
+        ivPercentile,
+        vixAdjustment: VolatilityAnalysis.calculateVixAdjustment(vix),
+        ivPercentileAdjustment: VolatilityAnalysis.calculateIVPercentileAdjustment(ivPercentile)
+      });
+
+      // Log example of raw option data structure
+      const exampleCall = Object.values(optionsData.strikes.call)[0];
+      const examplePut = Object.values(optionsData.strikes.put)[0];
+      console.log('Example Raw Option Data Structure:', {
+        call: {
+          strike: exampleCall.strike,
+          lastPrice: exampleCall.lastPrice,
+          bid: exampleCall.bid,
+          ask: exampleCall.ask,
+          volume: exampleCall.volume,
+          openInterest: exampleCall.openInterest,
+          impliedVolatility: exampleCall.impliedVolatility,
+          delta: exampleCall.delta,
+          gamma: exampleCall.gamma,
+          theta: exampleCall.theta,
+          vega: exampleCall.vega
+        },
+        put: {
+          strike: examplePut.strike,
+          lastPrice: examplePut.lastPrice,
+          bid: examplePut.bid,
+          ask: examplePut.ask,
+          volume: examplePut.volume,
+          openInterest: examplePut.openInterest,
+          impliedVolatility: examplePut.impliedVolatility,
+          delta: examplePut.delta,
+          gamma: examplePut.gamma,
+          theta: examplePut.theta,
+          vega: examplePut.vega
+        }
+      });
 
       // Get available strikes
-      const availableStrikes = Object.keys(optionsData.strikes.put).map(Number);
-      if (availableStrikes.length === 0) {
+      const putStrikes = Object.keys(optionsData.strikes.put).map(Number).sort((a, b) => a - b);
+      const callStrikes = Object.keys(optionsData.strikes.call).map(Number).sort((a, b) => a - b);
+
+      if (putStrikes.length === 0 || callStrikes.length === 0) {
         throw new Error('No strikes available in options data');
       }
 
-      // Calculate strikes based on strategy
       let buyStrike: number;
       let sellStrike: number;
       let targetCredit: number;
       let maxLoss: number;
+      let probabilityOfProfit: number;
+
+      // Adjust strike distances based on VIX and IV percentile
+      const vixAdjustment = VolatilityAnalysis.calculateVixAdjustment(vix);
+      const ivPercentileAdjustment = VolatilityAnalysis.calculateIVPercentileAdjustment(ivPercentile);
+      const totalVolAdjustment = vixAdjustment * ivPercentileAdjustment;
 
       switch (strategy) {
-        case 'BULL_PUT_SPREAD':
-          // Find strikes closest to 2% and 4% OTM
-          const targetSellStrike = Math.round(currentPrice * 0.98);
-          const targetBuyStrike = Math.round(currentPrice * 0.96);
+        case 'BULL_PUT_SPREAD': {
+          // For bull put spread, we want to sell a put at a higher strike and buy a put at a lower strike
+          // Example: Sell $592 Put, Buy $580 Put
+          const targetSellStrike = Math.round(currentPrice * 0.98); // 2% OTM
+          const targetBuyStrike = Math.round(currentPrice * 0.96); // 4% OTM
           
           // Find closest available strikes
-          sellStrike = availableStrikes.reduce((prev, curr) => 
+          sellStrike = putStrikes.reduce((prev, curr) => 
             Math.abs(curr - targetSellStrike) < Math.abs(prev - targetSellStrike) ? curr : prev
           );
-          buyStrike = availableStrikes.reduce((prev, curr) => 
+          buyStrike = putStrikes.reduce((prev, curr) => 
             Math.abs(curr - targetBuyStrike) < Math.abs(prev - targetBuyStrike) ? curr : prev
           );
 
-          // Get actual option prices from options data
+          // Get actual option prices from OptionsService
           const sellPut = optionsData.strikes.put[sellStrike];
           const buyPut = optionsData.strikes.put[buyStrike];
 
@@ -378,16 +297,53 @@ export class OptionsStrategyAnalyzer {
             throw new Error('Could not find option prices for selected strikes');
           }
 
-          // Calculate actual credit and max loss
-          targetCredit = sellPut.bid - buyPut.ask;
-          maxLoss = sellStrike - buyStrike - targetCredit;
+          // Log raw option data for debugging
+          console.log('Raw Option Data:', {
+            sellPut,
+            buyPut
+          });
 
-          // Calculate probability of profit using implied volatility
-          const breakevenPrice = sellStrike - targetCredit;
-          const distanceToBreakeven = Math.abs(currentPrice - breakevenPrice);
-          const avgIV = (sellPut.impliedVolatility + buyPut.impliedVolatility) / 2;
-          const standardDeviation = currentPrice * avgIV * Math.sqrt(daysToExpiration / 365);
-          const probabilityOfProfit = 1 - (distanceToBreakeven / standardDeviation);
+          // Calculate actual credit and max loss using last prices
+          // For 100 contracts (standard options contract size)
+          const sellPutPrice = sellPut.lastPrice * 100;
+          const buyPutPrice = buyPut.lastPrice * 100;
+          targetCredit = sellPutPrice - buyPutPrice; // Net credit received
+          maxLoss = (sellStrike - buyStrike) * 100 - targetCredit; // Maximum loss = width of spread - credit received
+
+          // Calculate breakeven price
+          const breakevenPrice = sellStrike - (targetCredit / 100);
+
+          // Calculate probability of profit using 30-day implied volatility
+          probabilityOfProfit = TechnicalAnalysis.calculateProbabilityOfProfit(
+            currentPrice,
+            sellStrike,
+            buyStrike,
+            sellPut.impliedVolatility,
+            buyPut.impliedVolatility,
+            daysToExpiration,
+            marketData
+          );
+
+          // Log the actual values for debugging
+          console.log('Bull Put Spread Details:', {
+            currentPrice,
+            vix,
+            ivPercentile,
+            vixAdjustment,
+            ivPercentileAdjustment,
+            totalVolAdjustment,
+            sellStrike,
+            buyStrike,
+            sellPutPrice,
+            buyPutPrice,
+            targetCredit,
+            maxLoss,
+            breakevenPrice,
+            probabilityOfProfit,
+            sellPutIV: sellPut.impliedVolatility,
+            buyPutIV: buyPut.impliedVolatility,
+            daysToExpiration
+          });
 
           return {
             strategy,
@@ -400,21 +356,46 @@ export class OptionsStrategyAnalyzer {
             daysToExpiration,
             expiryDate,
             breakevenPrice,
-            probabilityOfProfit: Math.max(0, Math.min(1, probabilityOfProfit))
+            probabilityOfProfit
           };
+        }
 
-        case 'BEAR_CALL_SPREAD':
-          // For bear call spread, use strikes that are 1-2% OTM
-          sellStrike = Math.round(currentPrice * 1.02); // 2% OTM
-          buyStrike = Math.round(currentPrice * 1.04); // 4% OTM
-          const callSpreadWidth = buyStrike - sellStrike;
-          targetCredit = callSpreadWidth * 0.35; // Target 35% of max loss
-          maxLoss = callSpreadWidth - targetCredit;
+        case 'BEAR_CALL_SPREAD': {
+          // Find strikes closest to 2% and 4% OTM
+          const targetCallSellStrike = Math.round(currentPrice * 1.02);
+          const targetCallBuyStrike = Math.round(currentPrice * 1.04);
+          
+          // Find closest available strikes
+          sellStrike = callStrikes.reduce((prev, curr) => 
+            Math.abs(curr - targetCallSellStrike) < Math.abs(prev - targetCallSellStrike) ? curr : prev
+          );
+          buyStrike = callStrikes.reduce((prev, curr) => 
+            Math.abs(curr - targetCallBuyStrike) < Math.abs(prev - targetCallBuyStrike) ? curr : prev
+          );
 
-          // Calculate probability of profit based on breakeven price
-          const callBreakevenPrice = sellStrike + targetCredit;
-          const callDistanceToBreakeven = Math.abs(currentPrice - callBreakevenPrice);
-          const callProbabilityOfProfit = 1 - (callDistanceToBreakeven / callSpreadWidth);
+          // Get actual option prices
+          const sellCall = optionsData.strikes.call[sellStrike];
+          const buyCall = optionsData.strikes.call[buyStrike];
+
+          if (!sellCall || !buyCall) {
+            throw new Error('Could not find option prices for selected strikes');
+          }
+
+          // Calculate actual credit and max loss
+          targetCredit = sellCall.bid - buyCall.ask;
+          maxLoss = buyStrike - sellStrike - targetCredit;
+
+          // Calculate probability of profit using implied volatility
+          const bearCallBreakevenPrice = sellStrike + targetCredit;
+          probabilityOfProfit = TechnicalAnalysis.calculateProbabilityOfProfit(
+            currentPrice,
+            sellStrike,
+            buyStrike,
+            sellCall.impliedVolatility,
+            buyCall.impliedVolatility,
+            daysToExpiration,
+            marketData
+          );
 
           return {
             strategy,
@@ -426,37 +407,69 @@ export class OptionsStrategyAnalyzer {
             maxLoss,
             daysToExpiration,
             expiryDate,
-            breakevenPrice: callBreakevenPrice,
-            probabilityOfProfit: callProbabilityOfProfit
+            breakevenPrice: bearCallBreakevenPrice,
+            probabilityOfProfit
           };
+        }
 
-        case 'IRON_CONDOR':
-          // For iron condor, use 0.16 delta for all legs
-          const putSpread = Math.round(currentPrice * 0.02); // 2% width
-          const callSpread = Math.round(currentPrice * 0.02); // 2% width
-          sellStrike = Math.round(currentPrice * 0.98); // Put spread
-          buyStrike = Math.round(currentPrice * 0.96); // Put spread
-          targetCredit = (putSpread + callSpread) * 0.35; // Target 35% of max loss
-          maxLoss = Math.max(putSpread, callSpread) - targetCredit;
+        case 'IRON_CONDOR': {
+          // Find strikes for both spreads
+          const putSellStrike = putStrikes.reduce((prev, curr) => 
+            Math.abs(curr - currentPrice * 0.98) < Math.abs(prev - currentPrice * 0.98) ? curr : prev
+          );
+          const putBuyStrike = putStrikes.reduce((prev, curr) => 
+            Math.abs(curr - currentPrice * 0.96) < Math.abs(prev - currentPrice * 0.96) ? curr : prev
+          );
+          const callSellStrike = callStrikes.reduce((prev, curr) => 
+            Math.abs(curr - currentPrice * 1.02) < Math.abs(prev - currentPrice * 1.02) ? curr : prev
+          );
+          const callBuyStrike = callStrikes.reduce((prev, curr) => 
+            Math.abs(curr - currentPrice * 1.04) < Math.abs(prev - currentPrice * 1.04) ? curr : prev
+          );
 
-          // Calculate probability of profit based on breakeven prices
-          const putBreakevenPrice = sellStrike - targetCredit;
-          const putDistanceToBreakeven = Math.abs(currentPrice - putBreakevenPrice);
-          const putProbabilityOfProfit = 1 - (putDistanceToBreakeven / putSpread);
+          // Get actual option prices
+          const putSell = optionsData.strikes.put[putSellStrike];
+          const putBuy = optionsData.strikes.put[putBuyStrike];
+          const callSell = optionsData.strikes.call[callSellStrike];
+          const callBuy = optionsData.strikes.call[callBuyStrike];
+
+          if (!putSell || !putBuy || !callSell || !callBuy) {
+            throw new Error('Could not find option prices for selected strikes');
+          }
+
+          // Calculate actual credit and max loss
+          const putCredit = putSell.bid - putBuy.ask;
+          const callCredit = callSell.bid - callBuy.ask;
+          targetCredit = putCredit + callCredit;
+          maxLoss = Math.max(putSellStrike - putBuyStrike, callBuyStrike - callSellStrike) - targetCredit;
+
+          // Calculate probability of profit using implied volatility
+          const ironCondorPutBreakeven = putSellStrike - putCredit;
+
+          probabilityOfProfit = TechnicalAnalysis.calculateProbabilityOfProfit(
+            currentPrice,
+            putSellStrike,
+            putBuyStrike,
+            putSell.impliedVolatility,
+            putBuy.impliedVolatility,
+            daysToExpiration,
+            marketData
+          );
 
           return {
             strategy,
-            buyStrike,
-            sellStrike,
+            buyStrike: putBuyStrike,
+            sellStrike: putSellStrike,
             buyOptionType: 'PUT',
             sellOptionType: 'PUT',
             targetCredit,
             maxLoss,
             daysToExpiration,
             expiryDate,
-            breakevenPrice: putBreakevenPrice,
-            probabilityOfProfit: putProbabilityOfProfit
+            breakevenPrice: ironCondorPutBreakeven,
+            probabilityOfProfit
           };
+        }
 
         default:
           throw new Error(`Unsupported strategy: ${strategy}`);
@@ -481,7 +494,7 @@ export class OptionsStrategyAnalyzer {
     return `
 Strategy: ${recommendation.strategy}
 Position Size: $${recommendation.positionSize.toFixed(2)}
-Expected Win Rate: ${(recommendation.expectedWinRate * 100).toFixed(1)}%
+Expected Win Rate: ${recommendation.expectedWinRate}%
 Risk Level: ${recommendation.riskLevel}
 Signal Strength: ${recommendation.signalStrength.toFixed(1)}/5
 Max Risk: $${recommendation.maxRisk.toFixed(2)}
@@ -490,14 +503,14 @@ Reasoning:
 ${recommendation.reasoning}
 
 Strategy Parameters:
-- Target Credit: $${recommendation.strategyParameters.targetCredit.toFixed(2)}
-- Max Loss: $${recommendation.strategyParameters.maxLoss.toFixed(2)}
-- Days to Expiration: ${recommendation.strategyParameters.daysToExpiration}
-- Expiry Date: ${this.formatExpiryDate(recommendation.strategyParameters.expiryDate)}
-- Breakeven Price: $${recommendation.strategyParameters.breakevenPrice.toFixed(2)}
-- Probability of Profit: ${(recommendation.strategyParameters.probabilityOfProfit * 100).toFixed(1)}%
-${recommendation.strategyParameters.buyStrike ? `- Buy ${recommendation.strategyParameters.buyOptionType} Strike: $${recommendation.strategyParameters.buyStrike}` : ''}
-${recommendation.strategyParameters.sellStrike ? `- Sell ${recommendation.strategyParameters.sellOptionType} Strike: $${recommendation.strategyParameters.sellStrike}` : ''}
+- Target Credit: $${recommendation.parameters.targetCredit.toFixed(2)}
+- Max Loss: $${recommendation.parameters.maxLoss.toFixed(2)}
+- Days to Expiration: ${recommendation.parameters.daysToExpiration}
+- Expiry Date: ${this.formatExpiryDate(recommendation.parameters.expiryDate)}
+- Breakeven Price: $${recommendation.parameters.breakevenPrice.toFixed(2)}
+- Probability of Profit: ${recommendation.parameters.probabilityOfProfit}%
+${recommendation.parameters.buyStrike ? `- Buy ${recommendation.parameters.buyOptionType} Strike: $${recommendation.parameters.buyStrike}` : ''}
+${recommendation.parameters.sellStrike ? `- Sell ${recommendation.parameters.sellOptionType} Strike: $${recommendation.parameters.sellStrike}` : ''}
 `;
   }
 

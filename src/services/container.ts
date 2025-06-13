@@ -1,6 +1,5 @@
 import { MarketDataService } from './market-data-service';
 import { OptionsStrategyAnalyzer } from '../strategies/options-strategy-analyzer';
-import { Backtester } from '../strategies/backtester';
 import { RiskManager } from './risk-manager';
 import { AccountInfo } from '../types/account';
 
@@ -36,6 +35,5 @@ export class Container {
     
     // Register strategy services
     this.register('strategyAnalyzer', new OptionsStrategyAnalyzer(accountInfo));
-    this.register('backtester', new Backtester(accountInfo.balance));
   }
 } 

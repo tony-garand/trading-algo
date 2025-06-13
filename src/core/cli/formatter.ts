@@ -35,7 +35,7 @@ export class CLIFormatter {
   }
 
   private static formatStrategyParameters(recommendation: StrategyRecommendation): string {
-    const params = recommendation.strategyParameters;
+    const params = recommendation.parameters;
     const metrics = [
       ['Target Credit', formatMetricValue('TARGET_CREDIT', params.targetCredit)],
       ['Max Loss', formatMetricValue('MAX_LOSS', params.maxLoss)],
