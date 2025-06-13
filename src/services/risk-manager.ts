@@ -1,4 +1,4 @@
-import { MarketData } from './types';
+import { MarketData } from '../types/types';
 
 export interface RiskMetrics {
   maxPositionSize: number;

@@ -1,6 +1,9 @@
-import { MarketData } from './types';
+import { MarketData } from '../types/types';
 import { chromium } from 'playwright';
 import { Browser } from 'playwright';
+import { ConfigService } from '../config/config';
+import { Logger } from './logger';
+import { MarketDataError } from '../types/errors';
 
 export interface OptionsData {
   date: Date;
@@ -152,29 +155,38 @@ interface ProcessedOptions {
 }
 
 export class MarketDataService {
-  public static readonly YAHOO_FINANCE_API = 'https://query1.finance.yahoo.com/v8/finance/chart/SPY';
-  private static readonly VIX_API = 'https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX';
+  private config: ConfigService;
+  private logger: Logger;
+  private static readonly YAHOO_FINANCE_API = 'https://query1.finance.yahoo.com/v8/finance/chart/SPY';
+  private static readonly VIX_API = 'https://query1.finance.com/v8/finance/chart/%5EVIX';
   private static readonly OPTIONS_API = 'https://query1.finance.yahoo.com/v7/finance/options/SPY';
-  private static lastRequestTime = 0;
-  private static readonly MIN_REQUEST_INTERVAL = 5000; // 5 seconds between requests
-  private static optionsDataCache: { [key: string]: { data: any, timestamp: number } } = {};
-  private static readonly CACHE_DURATION = 60000; // 1 minute cache duration
+  private lastRequestTime = 0;
+  private readonly MIN_REQUEST_INTERVAL = 5000; // 5 seconds between requests
+  private optionsDataCache: { [key: string]: { data: any, timestamp: number } } = {};
+  private readonly CACHE_DURATION = 60000; // 1 minute cache duration
+
+  constructor() {
+    this.config = ConfigService.getInstance();
+    this.logger = Logger.getInstance();
+  }
 
   /**
    * Helper function to add delay between requests
    */
-  private static async delay(ms: number): Promise<void> {
+  private async delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
    * Helper function to ensure rate limiting
    */
-  private static async ensureRateLimit(): Promise<void> {
+  private async ensureRateLimit(): Promise<void> {
     const now = Date.now();
     const timeSinceLastRequest = now - this.lastRequestTime;
-    if (timeSinceLastRequest < this.MIN_REQUEST_INTERVAL) {
-      await this.delay(this.MIN_REQUEST_INTERVAL - timeSinceLastRequest);
+    const requestInterval = this.config.getApiConfig().requestInterval;
+    
+    if (timeSinceLastRequest < requestInterval) {
+      await this.delay(requestInterval - timeSinceLastRequest);
     }
     this.lastRequestTime = Date.now();
   }
@@ -182,9 +194,14 @@ export class MarketDataService {
   /**
    * Get cached options data if available and not expired
    */
-  private static getCachedOptionsData(key: string): any | null {
+  private getCachedOptionsData(key: string): any | null {
+    if (!this.config.getCacheConfig().enabled) {
+      return null;
+    }
+
     const cached = this.optionsDataCache[key];
-    if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION) {
+    if (cached && Date.now() - cached.timestamp < this.config.getCacheConfig().duration) {
+      this.logger.debug('Using cached options data', { key });
       return cached.data;
     }
     return null;
@@ -193,40 +210,53 @@ export class MarketDataService {
   /**
    * Cache options data
    */
-  private static cacheOptionsData(key: string, data: any): void {
+  private cacheOptionsData(key: string, data: any): void {
+    if (!this.config.getCacheConfig().enabled) {
+      return;
+    }
+
     this.optionsDataCache[key] = {
       data,
       timestamp: Date.now()
     };
+    this.logger.debug('Cached options data', { key });
   }
 
   /**
    * Fetch current market data including options chain
    */
-  static async fetchCurrentMarketData(): Promise<MarketData> {
+  async fetchCurrentMarketData(): Promise<MarketData> {
     try {
+      this.logger.info('Fetching current market data');
+      
       // Fetch SPY data
-      const response = await fetch(this.YAHOO_FINANCE_API + '?interval=1d&range=1y&indicators=quote&includeTimestamps=true');
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const apiConfig = this.config.getApiConfig();
+      const response = await fetch(apiConfig.yahooFinanceApi + '?interval=1d&range=1y&indicators=quote&includeTimestamps=true');
+      
+      if (!response.ok) {
+        throw new MarketDataError(`HTTP error! status: ${response.status}`);
+      }
+      
       const data = await response.json();
-
       const quote = data.chart.result[0].indicators.quote[0];
       const timestamps = data.chart.result[0].timestamp;
       const lastIndex = timestamps.length - 1;
 
       // Calculate technical indicators
       const close = quote.close.filter((price: number | null) => price !== null && price !== undefined);
-      const sma50 = this.calculateSMA(close, 50);
-      const sma200 = this.calculateSMA(close, 200);
+      const technicalConfig = this.config.getTechnicalConfig();
+      
+      const sma50 = this.calculateSMA(close, technicalConfig.smaPeriods[0]);
+      const sma200 = this.calculateSMA(close, technicalConfig.smaPeriods[1]);
       const macd = this.calculateMACD(close);
-      const rsi = this.calculateRSI(close);
+      const rsi = this.calculateRSI(close, technicalConfig.rsiPeriod);
 
       // Fetch options data
       const optionsData = await this.fetchOptionsData();
       const nearestExpiry = this.getNearestExpiry(optionsData);
       const daysToExpiration = this.calculateDaysBetween(new Date(), nearestExpiry);
 
-      return {
+      const marketData: MarketData = {
         price: quote.close[lastIndex],
         sma50: sma50[sma50.length - 1],
         sma200: sma200[sma200.length - 1],
@@ -244,16 +274,24 @@ export class MarketDataService {
           options: optionsData.options
         }
       };
+
+      this.logger.info('Successfully fetched market data', { 
+        price: marketData.price,
+        vix: marketData.vix,
+        rsi: marketData.rsi
+      });
+
+      return marketData;
     } catch (error) {
-      console.error('Error fetching market data:', error);
-      throw error;
+      this.logger.error('Error fetching market data', error as Error);
+      throw new MarketDataError(`Failed to fetch market data: ${(error as Error).message}`);
     }
   }
 
   /**
    * Fetch options data for a specific number of days to expiration
    */
-  static async getOptionsDataForDaysToExpiry(targetDaysToExpiry: number, toleranceDays: number = 5): Promise<OptionsData> {
+  async getOptionsDataForDaysToExpiry(targetDaysToExpiry: number, toleranceDays: number = 5): Promise<OptionsData> {
     try {
       const optionsData = await this.fetchOptionsData();
       const today = new Date();
@@ -298,7 +336,7 @@ export class MarketDataService {
   /**
    * Calculate Simple Moving Average
    */
-  private static calculateSMA(data: number[], period: number): number[] {
+  private calculateSMA(data: number[], period: number): number[] {
     if (data.length < period) {
       throw new Error(`Not enough data points for ${period}-day SMA calculation`);
     }
@@ -314,7 +352,7 @@ export class MarketDataService {
   /**
    * Calculate MACD
    */
-  private static calculateMACD(data: number[]): number[] {
+  private calculateMACD(data: number[]): number[] {
     const ema12 = this.calculateEMA(data, 12);
     const ema26 = this.calculateEMA(data, 26);
     return ema12.map((value, index) => value - ema26[index]);
@@ -323,7 +361,7 @@ export class MarketDataService {
   /**
    * Calculate EMA
    */
-  private static calculateEMA(data: number[], period: number): number[] {
+  private calculateEMA(data: number[], period: number): number[] {
     const k = 2 / (period + 1);
     const ema: number[] = [data[0]];
     
@@ -337,7 +375,7 @@ export class MarketDataService {
   /**
    * Calculate RSI
    */
-  private static calculateRSI(data: number[], period: number = 14): number[] {
+  private calculateRSI(data: number[], period: number = 14): number[] {
     const rsi: number[] = [];
     const changes = data.slice(1).map((value, index) => value - data[index]);
     
@@ -355,7 +393,7 @@ export class MarketDataService {
   /**
    * Calculate ADX
    */
-  private static calculateADX(high: number[], low: number[], close: number[], period: number = 14): number {
+  private calculateADX(high: number[], low: number[], close: number[], period: number = 14): number {
     const tr: number[] = [];
     const plusDM: number[] = [];
     const minusDM: number[] = [];
@@ -391,9 +429,9 @@ export class MarketDataService {
   /**
    * Fetch VIX
    */
-  public static async fetchVIX(): Promise<number> {
+  public async fetchVIX(): Promise<number> {
     try {
-      const response = await fetch(this.VIX_API);
+      const response = await fetch(MarketDataService.VIX_API);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -408,9 +446,9 @@ export class MarketDataService {
   /**
    * Calculate IV Percentile
    */
-  public static async calculateIVPercentile(): Promise<number> {
+  public async calculateIVPercentile(): Promise<number> {
     try {
-      const response = await fetch(this.VIX_API + '?interval=1d&range=1y');
+      const response = await fetch(MarketDataService.VIX_API + '?interval=1d&range=1y');
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -434,7 +472,7 @@ export class MarketDataService {
   /**
    * Fetch options data from Yahoo Finance using Playwright
    */
-  private static async fetchOptionsData(retryCount = 0): Promise<any> {
+  private async fetchOptionsData(retryCount = 0): Promise<any> {
     const cacheKey = 'default';
     const cachedData = this.getCachedOptionsData(cacheKey);
     if (cachedData) {
@@ -586,7 +624,7 @@ export class MarketDataService {
   /**
    * Extract expiration dates from options data
    */
-  private static extractExpirationDates(options: any[]): Date[] {
+  private extractExpirationDates(options: any[]): Date[] {
     const expirations = new Set<string>();
     
     options.forEach(option => {
@@ -603,7 +641,7 @@ export class MarketDataService {
   /**
    * Extract unique strikes from options data
    */
-  private static extractStrikes(options: any[]): number[] {
+  private extractStrikes(options: any[]): number[] {
     const strikes = new Set<number>();
     
     options.forEach(option => {
@@ -618,7 +656,7 @@ export class MarketDataService {
   /**
    * Get the nearest valid expiry date from options chain
    */
-  private static getNearestExpiry(optionsData: any): Date {
+  private getNearestExpiry(optionsData: any): Date {
     const today = new Date();
     return optionsData.expirations.find((date: Date) => date > today) || this.getNextFriday();
   }
@@ -626,7 +664,7 @@ export class MarketDataService {
   /**
    * Get the next Friday's date
    */
-  private static getNextFriday(): Date {
+  private getNextFriday(): Date {
     const today = new Date();
     const daysUntilFriday = (5 - today.getDay() + 7) % 7;
     const nextFriday = new Date(today);
@@ -637,12 +675,12 @@ export class MarketDataService {
   /**
    * Calculate days between two dates
    */
-  private static calculateDaysBetween(startDate: Date, endDate: Date): number {
+  private calculateDaysBetween(startDate: Date, endDate: Date): number {
     const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   }
 
-  private static processOptions(options: YahooOptionsForExpiration[]): ProcessedOptions {
+  private processOptions(options: YahooOptionsForExpiration[]): ProcessedOptions {
     const calls: { [strike: number]: OptionQuote } = {};
     const puts: { [strike: number]: OptionQuote } = {};
     
@@ -723,7 +761,7 @@ export class MarketDataService {
     return { call: calls, put: puts };
   }
 
-  private static calculatePutCallRatio(options: any[]): number {
+  private calculatePutCallRatio(options: any[]): number {
     const calls = options.filter(opt => opt.type === 'call');
     const puts = options.filter(opt => opt.type === 'put');
     const totalCallVolume = calls.reduce((sum, call) => sum + call.volume, 0);
