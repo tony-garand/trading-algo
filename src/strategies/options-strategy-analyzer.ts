@@ -176,16 +176,24 @@ export class OptionsStrategyAnalyzer {
       reasons.push('Price is below both 50 and 200-day moving averages');
     }
 
+    // Detailed MACD analysis
     if (data.macd > 0) {
-      reasons.push('MACD is positive, indicating upward momentum');
+      reasons.push(`MACD is positive (${data.macd.toFixed(2)}), indicating upward momentum`);
     } else if (data.macd < 0) {
-      reasons.push('MACD is negative, indicating downward momentum');
+      reasons.push(`MACD is negative (${data.macd.toFixed(2)}), indicating downward momentum`);
     }
 
-    if (data.rsi < OptionsStrategyAnalyzer.RSI_THRESHOLDS.OVERSOLD) {
-      reasons.push('RSI indicates oversold conditions');
-    } else if (data.rsi > OptionsStrategyAnalyzer.RSI_THRESHOLDS.OVERBOUGHT) {
-      reasons.push('RSI indicates overbought conditions');
+    // Detailed RSI analysis
+    if (data.rsi >= 70) {
+      reasons.push(`RSI is overbought at ${data.rsi.toFixed(2)}, suggesting potential reversal`);
+    } else if (data.rsi <= 30) {
+      reasons.push(`RSI is oversold at ${data.rsi.toFixed(2)}, suggesting potential bounce`);
+    } else if (data.rsi > 60) {
+      reasons.push(`RSI is elevated at ${data.rsi.toFixed(2)}, approaching overbought territory`);
+    } else if (data.rsi < 40) {
+      reasons.push(`RSI is depressed at ${data.rsi.toFixed(2)}, approaching oversold territory`);
+    } else {
+      reasons.push(`RSI is neutral at ${data.rsi.toFixed(2)}`);
     }
 
     return reasons.join('. ');
