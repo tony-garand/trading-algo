@@ -7,6 +7,9 @@ export interface RiskMetrics {
   maxDrawdown: number;
   volatilityAdjustment: number;
   correlationRisk: number;
+  maxRisk: number;
+  stopLoss: number;
+  profitTarget: number;
 }
 
 export class RiskManager {
@@ -29,13 +32,21 @@ export class RiskManager {
     // Calculate maximum drawdown based on historical volatility
     const maxDrawdown = this.calculateMaxDrawdown(marketData);
 
+    // Calculate max risk and profit target
+    const maxRisk = maxPositionSize;
+    const stopLoss = suggestedStopLoss;
+    const profitTarget = marketData.price + (marketData.price - suggestedStopLoss) * riskRewardRatio;
+
     return {
       maxPositionSize,
       suggestedStopLoss,
       riskRewardRatio,
       maxDrawdown,
       volatilityAdjustment,
-      correlationRisk
+      correlationRisk,
+      maxRisk,
+      stopLoss,
+      profitTarget
     };
   }
 

@@ -7,10 +7,33 @@ export interface MarketData {
   vix: number;
   ivPercentile: number;
   adx: number;
-  volume?: number;
+  volume: number;
   date: Date;
+  optionsData?: {
+    expiryDate: Date;
+    strikes: number[];
+    daysToExpiration: number;
+    options: Array<{
+      option: string;
+      strike: number;
+      type: 'call' | 'put';
+      bid: number;
+      ask: number;
+      bid_size: number;
+      ask_size: number;
+      last_trade_price: number;
+      last_trade_time: string;
+      volume: number;
+      open_interest: number;
+      delta: number;
+      gamma: number;
+      vega: number;
+      theta: number;
+      rho: number;
+      theo: number;
+    }>;
+  };
   // New sentiment indicators
-  putCallRatio?: number;
   marketBreadth?: {
     advancing: number;
     declining: number;
@@ -22,4 +45,8 @@ export interface MarketData {
   marketCap?: number;
   earningsYield?: number;
   dividendYield?: number;
+  sentiment?: {
+    marketBreadth: number;
+    sectorPerformance: number;
+  };
 } 

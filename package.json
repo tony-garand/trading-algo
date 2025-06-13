@@ -13,7 +13,8 @@
     "backtest": "npm run analyze backtest",
     "watch": "tsc --watch",
     "clean": "rm -rf dist",
-    "strategy": "ts-node src/get-daily-strategy.ts"
+    "strategy": "ts-node src/strategy-runner.ts strategy",
+    "daily": "ts-node src/strategy-runner.ts strategy"
   },
   "keywords": [
     "options",
@@ -35,8 +36,11 @@
   },
   "dependencies": {
     "chalk": "^4.1.2",
+    "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0",
     "inquirer": "^8.2.4",
-    "moment": "^2.29.4"
+    "moment": "^2.29.4",
+    "playwright": "^1.53.0"
   },
   "engines": {
     "node": ">=16.0.0"
