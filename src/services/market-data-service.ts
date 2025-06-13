@@ -98,6 +98,7 @@ export class MarketDataService {
       ];
 
       const vix = await this.vixService.fetchVIX();
+      console.log('vix', vix);
       const ivPercentile = await this.vixService.calculateIVPercentile();
       const adxResult = this.technicalIndicators.calculateADX(quote.high, quote.low, quote.close);
 
