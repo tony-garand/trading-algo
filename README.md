@@ -14,6 +14,32 @@ This document outlines a systematic options trading strategy that analyzes marke
 - **Risk Management**: Built-in drawdown protection and position sizing limits
 - **Backtesting**: Historical performance analysis across different market conditions
 
+## Project Structure
+
+```
+src/
+├── core/                    # Core application functionality
+│   ├── cli/                # Command-line interface
+│   └── logger.ts           # Logging system
+├── services/               # Core services
+│   ├── market-data-service.ts    # Market data fetching and processing
+│   ├── options-service.ts        # Options chain analysis
+│   ├── technical-indicators-service.ts  # Technical analysis
+│   ├── vix-service.ts            # VIX data and analysis
+│   └── risk-manager.ts           # Risk management system
+├── strategies/             # Trading strategies
+│   └── options-strategy-analyzer.ts  # Main strategy implementation
+├── types/                  # TypeScript type definitions
+│   ├── account.ts         # Account-related types
+│   ├── backtest.ts        # Backtesting types
+│   ├── market.ts          # Market data types
+│   ├── risk.ts            # Risk management types
+│   └── strategy.ts        # Strategy-related types
+└── utils/                 # Utility functions
+    ├── technical-analysis.ts    # Technical analysis utilities
+    └── volatility-analysis.ts   # Volatility analysis utilities
+```
+
 ## Quick Start
 
 ### Installation
@@ -96,7 +122,9 @@ Based on market conditions, the system recommends:
 ## API Usage
 
 ```typescript
-import { OptionsStrategyAnalyzer } from './options-strategy-analyzer';
+import { OptionsStrategyAnalyzer } from './strategies/options-strategy-analyzer';
+import { MarketDataService } from './services/market-data-service';
+import { RiskManager } from './services/risk-manager';
 
 const accountInfo = {
   balance: 100000,
@@ -105,34 +133,13 @@ const accountInfo = {
   currentDrawdown: 0
 };
 
-const analyzer = new OptionsStrategyAnalyzer(accountInfo);
+const marketDataService = new MarketDataService();
+const riskManager = new RiskManager(accountInfo);
+const analyzer = new OptionsStrategyAnalyzer(marketDataService, riskManager);
 
-const marketData = {
-  price: 601.36,
-  sma50: 556.4,
-  sma200: 581.1,
-  macd: 9.51,
-  rsi: 61.31,
-  vix: 24.70,
-  ivPercentile: 45,
-  date: new Date()
-};
-
+const marketData = await marketDataService.getCurrentMarketData();
 const recommendation = analyzer.getCurrentRecommendation(marketData);
 console.log(analyzer.getFormattedRecommendation(recommendation));
-```
-
-## Project Structure
-
-```
-src/
-├── options-strategy-analyzer.ts  # Main strategy analyzer
-├── backtester.ts                 # Backtesting functionality
-├── risk-manager.ts              # Risk management system
-├── spy-data-fetcher.ts          # SPY data fetching
-├── strategy-runner.ts           # Strategy execution
-├── get-daily-strategy.ts        # Daily strategy recommendations
-└── types.ts                     # Type definitions
 ```
 
 ## Contributing
