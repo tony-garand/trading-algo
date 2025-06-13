@@ -1,11 +1,11 @@
 import { MarketDataService } from './services/market-data-service';
-import { MarketData } from './types/types';
 import { Backtester } from './strategies/backtester';
 import { OptionsStrategyAnalyzer } from './strategies/options-strategy-analyzer';
-import { RiskManager } from './services/risk-manager';
 import { Container } from './services/container';
 import { accountConfigs } from './config/account-config';
-import { AccountInfo } from './types/account';
+import { CLIFormatter } from './core/cli/formatter';
+import { QuestionHandler } from './core/cli/questions';
+import * as readline from 'readline';
 
 class StrategyRunner {
   private container: Container;
@@ -79,8 +79,8 @@ class StrategyRunner {
       // Get strategy recommendation
       const recommendation = await this.analyzer.getCurrentRecommendation(marketData);
       
-      // Display recommendation
-      console.log(this.analyzer.getFormattedRecommendation(recommendation));
+      // Display recommendation using CLIFormatter
+      console.log(CLIFormatter.formatRecommendation(recommendation));
       
     } catch (error) {
       console.error('Error getting strategy recommendation:', error);
@@ -90,18 +90,27 @@ class StrategyRunner {
 
 // CLI Command processor
 class CLI {
-  static processCommand(args: string[]): void {
+  private static rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  static async processCommand(args: string[]): Promise<void> {
     const command = args[0];
     const accountType = args[1] || 'medium';
     
     switch (command) {
       case 'backtest':
-        StrategyRunner.runBacktest(accountType);
+        await StrategyRunner.runBacktest(accountType);
         break;
         
       case 'strategy':
         const runner = new StrategyRunner(accountType);
-        runner.getCurrentStrategy();
+        await runner.getCurrentStrategy();
+        break;
+
+      case 'ask':
+        await this.startQuestionMode();
         break;
         
       case 'help':
@@ -110,6 +119,7 @@ class CLI {
         console.log('\nCommands:');
         console.log('  backtest [account-type]  - Run historical backtest');
         console.log('  strategy [account-type]  - Get current strategy recommendation');
+        console.log('  ask                      - Enter interactive question mode');
         console.log('  help                     - Show this help');
         console.log('\nAccount Types:');
         console.log('  small                    - $10,000 account');
@@ -118,6 +128,27 @@ class CLI {
         console.log('  stressed                 - Account in drawdown');
         break;
     }
+  }
+
+  private static async startQuestionMode(): Promise<void> {
+    console.log('\n=== Question Mode ===');
+    console.log('Ask questions about metrics, strategies, or concepts.');
+    console.log('Type "exit" to quit.\n');
+
+    const askQuestion = async () => {
+      this.rl.question('Your question: ', async (question) => {
+        if (question.toLowerCase() === 'exit') {
+          this.rl.close();
+          return;
+        }
+
+        const answer = await QuestionHandler.handleQuestion(question);
+        console.log('\n' + answer + '\n');
+        askQuestion();
+      });
+    };
+
+    await askQuestion();
   }
 }
 

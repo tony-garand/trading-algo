@@ -123,7 +123,7 @@ export class Backtester {
           rsi: rsi[rsi.length - 1],
           vix,
           ivPercentile,
-          adx: this.calculateADX(quote.high, quote.low, quote.close),
+          ...this.calculateADX(quote.high, quote.low, quote.close),
           volume: quote.volume[i],
           date
         });
@@ -194,8 +194,10 @@ export class Backtester {
     return rsi;
   }
 
-  private calculateADX(high: number[], low: number[], close: number[], period: number = 14): number {
-    if (high.length < period || low.length < period || close.length < period) return 0;
+  private calculateADX(high: number[], low: number[], close: number[], period: number = 14): { adx: number; plusDI: number; minusDI: number } {
+    if (high.length < period || low.length < period || close.length < period) {
+      return { adx: 0, plusDI: 0, minusDI: 0 };
+    }
     
     const tr: number[] = [];
     const plusDM: number[] = [];
@@ -227,7 +229,15 @@ export class Backtester {
       Math.abs(value - minusDI[index]) / (value + minusDI[index]) * 100
     );
     
-    return this.calculateEMA(dx, period)[dx.length - 1];
+    const adx = this.calculateEMA(dx, period)[dx.length - 1];
+    const finalPlusDI = plusDI[plusDI.length - 1];
+    const finalMinusDI = minusDI[minusDI.length - 1];
+
+    return {
+      adx,
+      plusDI: finalPlusDI,
+      minusDI: finalMinusDI
+    };
   }
 
   private calculateSignalStrength(data: MarketData): number {

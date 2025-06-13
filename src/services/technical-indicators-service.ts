@@ -1,12 +1,4 @@
-import { Logger } from '../core/logger';
-
 export class TechnicalIndicatorsService {
-  private logger: Logger;
-
-  constructor() {
-    this.logger = Logger.getInstance();
-  }
-
   /**
    * Calculate Simple Moving Average
    */
@@ -67,7 +59,7 @@ export class TechnicalIndicatorsService {
   /**
    * Calculate ADX
    */
-  calculateADX(high: number[], low: number[], close: number[], period: number = 14): number {
+  calculateADX(high: number[], low: number[], close: number[], period: number = 14): { adx: number; plusDI: number; minusDI: number } {
     const tr: number[] = [];
     const plusDM: number[] = [];
     const minusDM: number[] = [];
@@ -97,6 +89,14 @@ export class TechnicalIndicatorsService {
       Math.abs((value - minusDI[index]) / (value + minusDI[index])) * 100
     );
 
-    return this.calculateEMA(dx, period)[dx.length - 1];
+    const adx = this.calculateEMA(dx, period)[dx.length - 1];
+    const finalPlusDI = plusDI[plusDI.length - 1];
+    const finalMinusDI = minusDI[minusDI.length - 1];
+
+    return {
+      adx,
+      plusDI: finalPlusDI,
+      minusDI: finalMinusDI
+    };
   }
 } 

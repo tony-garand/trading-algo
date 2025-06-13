@@ -7,6 +7,8 @@ export interface MarketData {
   vix: number;
   ivPercentile: number;
   adx: number;
+  plusDI: number;  // Positive Directional Indicator
+  minusDI: number; // Negative Directional Indicator
   volume: number;
   date: Date;
   optionsData?: {
