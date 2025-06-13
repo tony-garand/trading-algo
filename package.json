@@ -6,15 +6,15 @@
   "types": "dist/options-strategy-analyzer.d.ts",
   "scripts": {
     "build": "tsc",
-    "dev": "ts-node src/strategy-runner.ts",
-    "start": "node dist/strategy-runner.js",
-    "analyze": "ts-node src/strategy-runner.ts",
+    "dev": "ts-node src/index.ts",
+    "start": "node dist/index.js",
+    "analyze": "ts-node src/index.ts",
     "test": "npm run build && npm run backtest",
     "backtest": "npm run analyze backtest",
     "watch": "tsc --watch",
     "clean": "rm -rf dist",
-    "strategy": "ts-node src/strategy-runner.ts strategy",
-    "daily": "ts-node src/strategy-runner.ts strategy"
+    "strategy": "ts-node src/index.ts strategy",
+    "daily": "ts-node src/index.ts strategy"
   },
   "keywords": [
     "options",

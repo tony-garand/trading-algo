@@ -1,8 +1,8 @@
 // Options Strategy Analyzer - Enhanced Technical Analysis System
 // Implements dynamic strategy switching with volatility and signal strength optimization
 
-import { MarketData } from './types';
-import { MarketDataService } from './market-data-service';
+import { MarketData } from '../types';
+import { MarketDataService } from '../services/market-data-service';
 import { format, toZonedTime } from 'date-fns-tz';
 
 interface TechnicalSignal {
@@ -59,9 +59,11 @@ export class OptionsStrategyAnalyzer {
   private accountInfo: AccountInfo;
   private readonly MIN_DAYS_TO_EXPIRATION = 20;
   private readonly MAX_DAYS_TO_EXPIRATION = 30;
+  private marketDataService: MarketDataService;
 
   constructor(accountInfo: AccountInfo) {
     this.accountInfo = accountInfo;
+    this.marketDataService = new MarketDataService();
   }
 
   /**
@@ -251,7 +253,7 @@ export class OptionsStrategyAnalyzer {
     marketBias: 'BULLISH' | 'BEARISH' | 'NEUTRAL',
     ivEnvironment: 'LOW' | 'MEDIUM' | 'HIGH'
   ): string {
-    const reasons = [];
+    const reasons = [] as string[];
 
     // Market bias reasoning
     reasons.push(`Market bias is ${marketBias.toLowerCase()} based on technical indicators`);
@@ -312,7 +314,7 @@ export class OptionsStrategyAnalyzer {
     }
 
     try {
-      const optionsData = await MarketDataService.getOptionsDataForDaysToExpiry(daysToExpiration);
+      const optionsData = await this.marketDataService.getOptionsDataForDaysToExpiry(daysToExpiration);
       
       if (!optionsData?.strikes?.put || Object.keys(optionsData.strikes.put).length === 0) {
         throw new Error('No valid options data found');

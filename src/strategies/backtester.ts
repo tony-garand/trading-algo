@@ -1,7 +1,10 @@
-import { MarketData } from './types';
-import { RiskMetrics } from './risk-manager';
+import { MarketData } from '../types/types';
+import { RiskMetrics } from '../services/risk-manager';
 import { StrategyParameters } from './options-strategy-analyzer';
-import { MarketDataService } from './market-data-service';
+import { MarketDataService } from '../services/market-data-service';
+import { TechnicalAnalysis } from '../utils/technical-analysis';
+import { VolatilityAnalysis } from '../utils/volatility-analysis';
+import { ConfigService } from '../config/config';
 
 export interface BacktestResult {
   totalTrades: number;
@@ -36,11 +39,15 @@ export class Backtester {
   private readonly MAX_LOSS_TARGET = 0.50; // 50% maximum loss target
   private readonly MIN_DAYS_TO_EXPIRATION = 20;
   private readonly MAX_DAYS_TO_EXPIRATION = 30;
+  private marketDataService: MarketDataService;
+  private config: ConfigService;
 
   constructor(initialBalance: number = 100000) {
     this.accountBalance = initialBalance;
     this.peakBalance = initialBalance;
     this.historicalData = [];
+    this.marketDataService = new MarketDataService();
+    this.config = ConfigService.getInstance();
   }
 
   public setHistoricalData(data: MarketData[]): void {
@@ -53,7 +60,7 @@ export class Backtester {
   async initialize(): Promise<void> {
     try {
       console.log('Fetching historical data from Yahoo Finance...');
-      const response = await fetch(MarketDataService.YAHOO_FINANCE_API + '?interval=1d&range=2y&indicators=quote&includeTimestamps=true');
+      const response = await fetch(this.config.getApiConfig().yahooFinanceApi + '?interval=1d&range=2y&indicators=quote&includeTimestamps=true');
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -102,8 +109,8 @@ export class Backtester {
         // Skip future dates
         if (date > new Date()) continue;
 
-        const vix = await MarketDataService.fetchVIX();
-        const ivPercentile = await MarketDataService.calculateIVPercentile();
+        const vix = await this.marketDataService.fetchVIX();
+        const ivPercentile = await this.marketDataService.calculateIVPercentile();
 
         this.historicalData.push({
           price: quote.close[i],

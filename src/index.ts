@@ -1,53 +1,21 @@
-import { MarketDataService } from './market-data-service';
-import { MarketData } from './types';
-import { Backtester } from './backtester';
-import { OptionsStrategyAnalyzer } from './options-strategy-analyzer';
-
-interface AccountInfo {
-  balance: number;
-  maxRiskPerTrade: number;
-  maxOpenPositions: number;
-  currentDrawdown: number;
-}
-
-// Account configurations for different account sizes
-const accountConfigs: { [key: string]: AccountInfo } = {
-  small: {
-    balance: 10000,
-    maxRiskPerTrade: 0.10, // 10% max
-    maxOpenPositions: 2,
-    currentDrawdown: 0
-  },
-  
-  medium: {
-    balance: 40000,
-    maxRiskPerTrade: 0.12, // 12% max
-    maxOpenPositions: 3,
-    currentDrawdown: 0
-  },
-  
-  large: {
-    balance: 100000,
-    maxRiskPerTrade: 0.15, // 15% max
-    maxOpenPositions: 4,
-    currentDrawdown: 0
-  },
-
-  // Account in drawdown
-  stressed: {
-    balance: 32000, // Down from 40k
-    maxRiskPerTrade: 0.08, // Reduced max risk
-    maxOpenPositions: 2,
-    currentDrawdown: 20 // 20% drawdown
-  }
-};
+import { MarketDataService } from './services/market-data-service';
+import { MarketData } from './types/types';
+import { Backtester } from './strategies/backtester';
+import { OptionsStrategyAnalyzer } from './strategies/options-strategy-analyzer';
+import { RiskManager } from './services/risk-manager';
+import { Container } from './services/container';
+import { accountConfigs } from './config/account-config';
+import { AccountInfo } from './types/account';
 
 class StrategyRunner {
+  private container: Container;
   private analyzer: OptionsStrategyAnalyzer;
   
   constructor(accountType: string = 'medium') {
     const accountInfo = accountConfigs[accountType];
-    this.analyzer = new OptionsStrategyAnalyzer(accountInfo);
+    this.container = Container.getInstance();
+    this.container.initializeServices(accountInfo);
+    this.analyzer = this.container.get<OptionsStrategyAnalyzer>('strategyAnalyzer');
   }
   
   /**
@@ -59,9 +27,11 @@ class StrategyRunner {
     console.log(`${'='.repeat(60)}`);
 
     try {
-      // Initialize backtester with account balance
+      const container = Container.getInstance();
       const accountInfo = accountConfigs[accountType];
-      const backtester = new Backtester(accountInfo.balance);
+      container.initializeServices(accountInfo);
+      
+      const backtester = container.get<Backtester>('backtester');
       
       // Initialize backtester with historical data
       console.log('Initializing backtester with historical data...');
@@ -101,8 +71,10 @@ class StrategyRunner {
    */
   async getCurrentStrategy(): Promise<void> {
     try {
+      const marketDataService = this.container.get<MarketDataService>('marketDataService');
+      
       // Fetch current market data
-      const marketData = await MarketDataService.fetchCurrentMarketData();
+      const marketData = await marketDataService.fetchCurrentMarketData();
       
       // Get strategy recommendation
       const recommendation = await this.analyzer.getCurrentRecommendation(marketData);
