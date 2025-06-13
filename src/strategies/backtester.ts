@@ -2,6 +2,7 @@ import { MarketData } from '../types/types';
 import { RiskMetrics } from '../services/risk-manager';
 import { StrategyParameters } from './options-strategy-analyzer';
 import { MarketDataService } from '../services/market-data-service';
+import { VIXService } from '../services/vix-service';
 import { TechnicalAnalysis } from '../utils/technical-analysis';
 import { VolatilityAnalysis } from '../utils/volatility-analysis';
 import { ConfigService } from '../config/config';
@@ -40,6 +41,7 @@ export class Backtester {
   private readonly MIN_DAYS_TO_EXPIRATION = 20;
   private readonly MAX_DAYS_TO_EXPIRATION = 30;
   private marketDataService: MarketDataService;
+  private vixService: VIXService;
   private config: ConfigService;
 
   constructor(initialBalance: number = 100000) {
@@ -47,6 +49,7 @@ export class Backtester {
     this.peakBalance = initialBalance;
     this.historicalData = [];
     this.marketDataService = new MarketDataService();
+    this.vixService = new VIXService();
     this.config = ConfigService.getInstance();
   }
 
@@ -109,8 +112,8 @@ export class Backtester {
         // Skip future dates
         if (date > new Date()) continue;
 
-        const vix = await this.marketDataService.fetchVIX();
-        const ivPercentile = await this.marketDataService.calculateIVPercentile();
+        const vix = await this.vixService.fetchVIX();
+        const ivPercentile = await this.vixService.calculateIVPercentile();
 
         this.historicalData.push({
           price: quote.close[i],

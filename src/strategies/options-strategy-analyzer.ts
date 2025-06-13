@@ -3,6 +3,7 @@
 
 import { MarketData } from '../types';
 import { MarketDataService } from '../services/market-data-service';
+import { OptionsService } from '../services/options-service';
 import { format, toZonedTime } from 'date-fns-tz';
 
 interface TechnicalSignal {
@@ -60,10 +61,12 @@ export class OptionsStrategyAnalyzer {
   private readonly MIN_DAYS_TO_EXPIRATION = 20;
   private readonly MAX_DAYS_TO_EXPIRATION = 30;
   private marketDataService: MarketDataService;
+  private optionsService: OptionsService;
 
   constructor(accountInfo: AccountInfo) {
     this.accountInfo = accountInfo;
     this.marketDataService = new MarketDataService();
+    this.optionsService = new OptionsService();
   }
 
   /**
@@ -284,17 +287,6 @@ export class OptionsStrategyAnalyzer {
   }
 
   /**
-   * Get the next Friday's date
-   */
-  private getNextFriday(): Date {
-    const today = new Date();
-    const daysUntilFriday = (5 - today.getDay() + 7) % 7;
-    const nextFriday = new Date(today);
-    nextFriday.setDate(today.getDate() + daysUntilFriday);
-    return nextFriday;
-  }
-
-  /**
    * Get strategy parameters based on the selected strategy
    */
   private async getStrategyParameters(marketData: MarketData, strategy: string): Promise<StrategyParameters> {
@@ -314,7 +306,7 @@ export class OptionsStrategyAnalyzer {
     }
 
     try {
-      const optionsData = await this.marketDataService.getOptionsDataForDaysToExpiry(daysToExpiration);
+      const optionsData = await this.optionsService.getOptionsDataForDaysToExpiry(daysToExpiration);
       
       if (!optionsData?.strikes?.put || Object.keys(optionsData.strikes.put).length === 0) {
         throw new Error('No valid options data found');

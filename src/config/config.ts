@@ -1,4 +1,4 @@
-import { LogLevel } from '../services/logger';
+import { LogLevel } from '../core/logger';
 import { accountConfigs } from './account-config';
 
 export interface TradingConfig {
