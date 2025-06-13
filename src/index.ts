@@ -1,5 +1,4 @@
 import { MarketDataService } from './services/market-data-service';
-import { Backtester } from './strategies/backtester';
 import { OptionsStrategyAnalyzer } from './strategies/options-strategy-analyzer';
 import { Container } from './services/container';
 import { accountConfigs } from './config/account-config';
@@ -17,54 +16,6 @@ class StrategyRunner {
     this.container.initializeServices(accountInfo);
     this.analyzer = this.container.get<OptionsStrategyAnalyzer>('strategyAnalyzer');
   }
-  
-  /**
-   * Run backtest analysis
-   */
-  static async runBacktest(accountType: string = 'medium'): Promise<void> {
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`RUNNING BACKTEST | ACCOUNT: ${accountType.toUpperCase()}`);
-    console.log(`${'='.repeat(60)}`);
-
-    try {
-      const container = Container.getInstance();
-      const accountInfo = accountConfigs[accountType];
-      container.initializeServices(accountInfo);
-      
-      const backtester = container.get<Backtester>('backtester');
-      
-      // Initialize backtester with historical data
-      console.log('Initializing backtester with historical data...');
-      await backtester.initialize();
-      
-      // Run backtest
-      console.log('Running backtest...');
-      const results = await backtester.runBacktest();
-
-      // Display results
-      console.log('\nBACKTEST RESULTS:');
-      console.log(`Total Trades: ${results.totalTrades}`);
-      console.log(`Win Rate: ${results.winRate.toFixed(1)}%`);
-      console.log(`Average Return: ${results.averageReturn.toFixed(1)}%`);
-      console.log(`Max Drawdown: ${results.maxDrawdown.toFixed(1)}%`);
-      console.log(`Sharpe Ratio: ${results.sharpeRatio.toFixed(2)}`);
-      console.log(`Profit Factor: ${results.profitFactor.toFixed(2)}`);
-
-      // Display recent trades
-      console.log('\nRECENT TRADES:');
-      const recentTrades = results.trades.slice(-5);
-      recentTrades.forEach(trade => {
-        console.log(`\nDate: ${trade.entryDate.toLocaleDateString()}`);
-        console.log(`Strategy: ${trade.strategy}`);
-        console.log(`Entry: $${trade.entryPrice.toFixed(2)}`);
-        console.log(`Exit: $${trade.exitPrice.toFixed(2)}`);
-        console.log(`P&L: ${(trade.pnl > 0 ? '+' : '')}${trade.pnl.toFixed(2)}`);
-      });
-
-    } catch (error) {
-      console.error('Error running backtest:', error);
-    }
-  }
 
   /**
    * Get current strategy recommendation
@@ -77,7 +28,7 @@ class StrategyRunner {
       const marketData = await marketDataService.fetchCurrentMarketData();
       
       // Get strategy recommendation
-      const recommendation = await this.analyzer.getCurrentRecommendation(marketData);
+      const recommendation = await this.analyzer.getCurrentRecommendation();
       
       // Display recommendation using CLIFormatter
       console.log(CLIFormatter.formatRecommendation(recommendation));
@@ -100,10 +51,6 @@ class CLI {
     const accountType = args[1] || 'medium';
     
     switch (command) {
-      case 'backtest':
-        await StrategyRunner.runBacktest(accountType);
-        break;
-        
       case 'strategy':
         const runner = new StrategyRunner(accountType);
         await runner.getCurrentStrategy();

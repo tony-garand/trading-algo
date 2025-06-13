@@ -26,7 +26,7 @@ export class VIXService {
   }
 
   /**
-   * Calculate IV Percentile
+   * Calculate IV Percentile using VIX data
    */
   public async calculateIVPercentile(): Promise<number> {
     try {
@@ -34,20 +34,30 @@ export class VIXService {
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
+      
       const data = await response.json();
       const vixData = data.chart.result[0].indicators.quote[0].close;
       const validVIX = vixData.filter((v: number | null) => v !== null && v !== undefined);
       
       if (validVIX.length === 0) {
-        return 50;
+        throw new Error('No valid VIX data available');
       }
 
       const currentVIX = validVIX[validVIX.length - 1];
       const sortedVIX = [...validVIX].sort((a, b) => a - b);
-      return (sortedVIX.indexOf(currentVIX) / sortedVIX.length) * 100;
+      
+      // Count how many values are less than or equal to current VIX
+      let count = 0;
+      for (const vix of sortedVIX) {
+        if (vix <= currentVIX) {
+          count++;
+        }
+      }
+      
+      return (count / sortedVIX.length) * 100;
     } catch (error) {
       this.logger.error('Error calculating IV percentile:', error as Error);
-      return 50; // Default value
+      return 50; // Default value for error cases
     }
   }
 } 

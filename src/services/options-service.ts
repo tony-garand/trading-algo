@@ -11,6 +11,12 @@ export interface OptionsData {
   };
   ivPercentile: number;
   putCallRatio: number;
+  options: {
+    expirationDate: number;
+    hasMiniOptions: boolean;
+    calls: any[];
+    puts: any[];
+  }[];
 }
 
 export interface OptionQuote {
@@ -144,7 +150,8 @@ export class OptionsService {
         underlyingPrice: optionsData.underlyingPrice,
         strikes: this.processOptions(options),
         ivPercentile: 0, // This should be calculated by VIXService
-        putCallRatio: this.calculatePutCallRatio(options)
+        putCallRatio: this.calculatePutCallRatio(options),
+        options: optionsData.options
       };
     } catch (error) {
       this.logger.error('Error fetching options data for specific DTE:', error as Error);
@@ -261,6 +268,7 @@ export class OptionsService {
 
       // Cache the data before returning
       this.cacheOptionsData(cacheKey, resolvedData);
+      console.log(resolvedData);
       return resolvedData;
 
     } catch (error) {
@@ -295,25 +303,6 @@ export class OptionsService {
     return Array.from(expirations)
       .map(date => new Date(parseInt(date) * 1000))
       .sort((a, b) => a.getTime() - b.getTime());
-  }
-
-  /**
-   * Get the nearest valid expiry date from options chain
-   */
-  private getNearestExpiry(optionsData: any): Date {
-    const today = new Date();
-    return optionsData.expirations.find((date: Date) => date > today) || this.getNextFriday();
-  }
-
-  /**
-   * Get the next Friday's date
-   */
-  private getNextFriday(): Date {
-    const today = new Date();
-    const daysUntilFriday = (5 - today.getDay() + 7) % 7;
-    const nextFriday = new Date(today);
-    nextFriday.setDate(today.getDate() + daysUntilFriday);
-    return nextFriday;
   }
 
   /**
