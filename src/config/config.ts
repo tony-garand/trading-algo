@@ -121,4 +121,18 @@ export class ConfigService {
   getTechnicalConfig() {
     return { ...this.config.technical };
   }
+
+  get<T>(path: string, defaultValue: T): T {
+    const parts = path.split('.');
+    let current: any = this.config;
+    
+    for (const part of parts) {
+      if (current === undefined || current === null) {
+        return defaultValue;
+      }
+      current = current[part];
+    }
+    
+    return current !== undefined ? current : defaultValue;
+  }
 } 

@@ -33,25 +33,29 @@ export interface OptionQuote {
   vega: number;
 }
 
-interface YahooOptionQuote {
-  percentChange: { raw: number; fmt: string };
-  openInterest: { raw: number; fmt: string; longFmt: string };
-  strike: { raw: number; fmt: string };
-  change: { raw: number; fmt: string };
-  inTheMoney: boolean;
-  impliedVolatility: { raw: number; fmt: string };
-  volume: { raw: number; fmt: string; longFmt: string };
-  ask: { raw: number; fmt: string };
-  contractSymbol: string;
-  lastTradeDate: { raw: number; fmt: string; longFmt: string };
-  currency: string;
-  expiration: { raw: number; fmt: string; longFmt: string };
-  contractSize: string;
-  bid: { raw: number; fmt: string };
-  lastPrice: { raw: number; fmt: string };
+export interface YahooOptionQuote {
+  percentChange?: { raw: number; fmt: string };
+  openInterest?: { raw: number; fmt: string; longFmt: string };
+  strike?: { raw: number; fmt: string };
+  change?: { raw: number; fmt: string };
+  inTheMoney?: boolean;
+  impliedVolatility?: { raw: number; fmt: string };
+  volume?: { raw: number; fmt: string; longFmt: string };
+  ask?: { raw: number; fmt: string };
+  contractSymbol?: string;
+  lastTradeDate?: { raw: number; fmt: string; longFmt: string };
+  currency?: string;
+  expiration?: { raw: number; fmt: string; longFmt: string };
+  contractSize?: string;
+  bid?: { raw: number; fmt: string };
+  lastPrice?: { raw: number; fmt: string };
+  delta?: number;
+  gamma?: number;
+  theta?: number;
+  vega?: number;
 }
 
-interface YahooOptionsForExpiration {
+export interface YahooOptionsForExpiration {
   expirationDate: number;
   hasMiniOptions: boolean;
   calls: YahooOptionQuote[];
@@ -123,7 +127,13 @@ export class OptionsService {
       
       // Find the expiration date closest to target days
       const targetDate = new Date(today.getTime() + targetDaysToExpiry * 24 * 60 * 60 * 1000);
-      const closestExpiration = optionsData.expirations.reduce((closest: Date, current: Date) => {
+      const expirationDates = this.extractExpirationDates(optionsData.options);
+      
+      if (!expirationDates || expirationDates.length === 0) {
+        throw new Error(`No expiration date found within ${toleranceDays} days of target ${targetDaysToExpiry} days`);
+      }
+
+      const closestExpiration = expirationDates.reduce((closest: Date, current: Date) => {
         const currentDiff = Math.abs(current.getTime() - targetDate.getTime());
         const closestDiff = Math.abs(closest.getTime() - targetDate.getTime());
         return currentDiff < closestDiff ? current : closest;
@@ -136,23 +146,30 @@ export class OptionsService {
       }
 
       // Process options data for the closest expiration
-      const options = optionsData.options.filter((opt: YahooOptionsForExpiration) => {
+      const options = optionsData.options.find((opt: any) => {
         const optDate = new Date(opt.expirationDate * 1000);
         return optDate.getTime() === closestExpiration.getTime();
       });
 
-      if (!options || options.length === 0) {
-        throw new Error('No options found for the selected expiration date');
+      if (!options) {
+        throw new Error('No valid options data found after processing');
       }
 
-      return {
-        date: new Date(),
-        underlyingPrice: optionsData.underlyingPrice,
-        strikes: this.processOptions(options),
-        ivPercentile: 0, // This should be calculated by VIXService
-        putCallRatio: this.calculatePutCallRatio(options),
-        options: optionsData.options
-      };
+      try {
+        const processedOptions = this.processOptions([options]);
+        const putCallRatio = this.calculatePutCallRatio([options]);
+
+        return {
+          date: new Date(),
+          underlyingPrice: optionsData.underlyingPrice,
+          strikes: processedOptions,
+          ivPercentile: 0, // This should be calculated by VIXService
+          putCallRatio,
+          options: optionsData.options
+        };
+      } catch (error) {
+        throw new Error('No valid options data found after processing');
+      }
     } catch (error) {
       this.logger.error('Error fetching options data for specific DTE:', error as Error);
       throw error;
@@ -181,6 +198,10 @@ export class OptionsService {
       // Set up response handler before navigation
       let optionsResponse: any = null;
       let responsePromise = new Promise<void>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error('Failed to capture options data response'));
+        }, this.config.get('options.responseTimeout', 30000));
+
         page.on('response', async (response) => {
           const url = response.url();
           if (url.includes('/v7/finance/options/SPY')) {
@@ -189,16 +210,22 @@ export class OptionsService {
               optionsResponse = json;
               
               if (!optionsResponse?.optionChain?.result?.[0]) {
-                throw new Error('Invalid Yahoo Finance options data format');
+                clearTimeout(timeoutId);
+                reject(new Error('Invalid Yahoo Finance options data format'));
+                return;
               }
 
               const result = optionsResponse.optionChain.result[0];
               if (!result.options || !Array.isArray(result.options) || result.options.length === 0) {
-                throw new Error('No options data found in response');
+                clearTimeout(timeoutId);
+                reject(new Error('No options data found in response'));
+                return;
               }
 
+              clearTimeout(timeoutId);
               resolve();
             } catch (e) {
+              clearTimeout(timeoutId);
               reject(e);
             }
           }
@@ -208,14 +235,18 @@ export class OptionsService {
       // Navigate to Yahoo Finance options page
       await page.goto('https://finance.yahoo.com/quote/SPY/options', {
         waitUntil: 'domcontentloaded',
-        timeout: 30000
+        timeout: this.config.get('options.navigationTimeout', 30000)
       });
 
       // Click the date button to open the listbox
-      await page.click('button.tertiary-btn.fin-size-small.menuBtn[data-type="date"]', { timeout: 10000 });
+      await page.click('button.tertiary-btn.fin-size-small.menuBtn[data-type="date"]', { 
+        timeout: this.config.get('options.clickTimeout', 10000) 
+      });
 
       // Wait for the date options to be available
-      await page.waitForSelector('div[role="option"]', { timeout: 10000 });
+      await page.waitForSelector('div[role="option"]', { 
+        timeout: this.config.get('options.selectorTimeout', 10000) 
+      });
 
       // Calculate target date (25 days from now)
       const today = new Date();
@@ -233,53 +264,29 @@ export class OptionsService {
           const closestDiff = Math.abs(parseInt(closest.getAttribute('data-value') || '0') - targetTimestamp);
           return currentDiff < closestDiff ? current : closest;
         }).getAttribute('data-value');
-      }, Math.floor(targetDate.getTime() / 1000));
+      }, targetDate.getTime() / 1000);
 
-      if (!closestDateTimestamp) {
-        throw new Error('Failed to find closest date');
-      }
+      // Click the closest date
+      await page.click(`div[role="option"][data-value="${closestDateTimestamp}"]`, { 
+        timeout: this.config.get('options.clickTimeout', 10000) 
+      });
 
-      // Click the closest date option
-      await page.click(`div[role="option"][data-value="${closestDateTimestamp}"]`);
+      // Wait for the options data to load
+      await responsePromise;
 
-      // Wait for the response with a timeout
-      try {
-        await Promise.race([
-          responsePromise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout waiting for options data')), 30000))
-        ]);
-      } catch (error) {
-        throw new Error('Failed to capture options data response');
-      }
+      // Cache the response
+      this.cacheOptionsData(cacheKey, optionsResponse);
 
-      if (!optionsResponse?.optionChain?.result?.[0]) {
-        throw new Error('No valid options data found');
-      }
-
-      const result = optionsResponse.optionChain.result[0];
-      const processedOptions = this.processOptions(result.options);
-      
-      const resolvedData = {
-        expirations: this.extractExpirationDates(result.options),
-        strikes: processedOptions,
-        options: result.options,
-        underlyingPrice: result.quote.regularMarketPrice
-      };
-
-      // Cache the data before returning
-      this.cacheOptionsData(cacheKey, resolvedData);
-      console.log(resolvedData);
-      return resolvedData;
-
+      return optionsResponse;
     } catch (error) {
-      this.logger.error('Error fetching Yahoo Finance options data:', error as Error);
-      if (browser) {
-        await browser.close();
-      }
+      this.logger.error('Error fetching options data:', error as Error);
+      
+      // Retry logic
       if (retryCount < 3) {
-        await this.delay(10000);
+        this.logger.debug(`Retrying fetchOptionsData (attempt ${retryCount + 1})`);
         return this.fetchOptionsData(retryCount + 1);
       }
+      
       throw error;
     } finally {
       if (browser) {
@@ -292,17 +299,17 @@ export class OptionsService {
    * Extract expiration dates from options data
    */
   private extractExpirationDates(options: any[]): Date[] {
-    const expirations = new Set<string>();
-    
-    options.forEach(option => {
-      if (option.expirationDate) {
-        expirations.add(option.expirationDate.toString());
-      }
-    });
+    const dates = options
+      .map(option => {
+        if (!option.expirationDate) return null;
+        const timestamp = typeof option.expirationDate === 'number' 
+          ? option.expirationDate * 1000 
+          : new Date(option.expirationDate).getTime();
+        return isNaN(timestamp) ? null : new Date(timestamp);
+      })
+      .filter((date): date is Date => date !== null && date.getTime() > 0);
 
-    return Array.from(expirations)
-      .map(date => new Date(parseInt(date) * 1000))
-      .sort((a, b) => a.getTime() - b.getTime());
+    return dates;
   }
 
   /**
@@ -394,11 +401,45 @@ export class OptionsService {
     return { call: calls, put: puts };
   }
 
-  private calculatePutCallRatio(options: any[]): number {
-    const calls = options.filter(opt => opt.type === 'call');
-    const puts = options.filter(opt => opt.type === 'put');
-    const totalCallVolume = calls.reduce((sum, call) => sum + call.volume, 0);
-    const totalPutVolume = puts.reduce((sum, put) => sum + put.volume, 0);
-    return totalPutVolume / totalCallVolume;
+  private calculatePutCallRatio(options: YahooOptionsForExpiration[]): number {
+    if (!options || options.length === 0) {
+      return 1; // Default to 1 when no options data
+    }
+
+    let totalPutVolume = 0;
+    let totalCallVolume = 0;
+
+    options.forEach(option => {
+      if (option.puts) {
+        totalPutVolume += option.puts.reduce((sum, put) => {
+          const volume = put.volume?.raw || 0;
+          return sum + volume;
+        }, 0);
+      }
+
+      if (option.calls) {
+        totalCallVolume += option.calls.reduce((sum, call) => {
+          const volume = call.volume?.raw || 0;
+          return sum + volume;
+        }, 0);
+      }
+    });
+
+    // If no volume in either puts or calls, return 1
+    if (totalPutVolume === 0 && totalCallVolume === 0) {
+      return 1;
+    }
+
+    // If only puts have volume, return 2 (very bearish)
+    if (totalCallVolume === 0) {
+      return 2;
+    }
+
+    // If only calls have volume, return 0.5 (very bullish)
+    if (totalPutVolume === 0) {
+      return 0.5;
+    }
+
+    return Number((totalPutVolume / totalCallVolume).toFixed(2));
   }
 } 

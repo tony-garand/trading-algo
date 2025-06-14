@@ -62,7 +62,8 @@ export class RiskManager {
       ? marketData.marketBreadth.advancing / (marketData.marketBreadth.advancing + marketData.marketBreadth.declining)
       : 1;
     
-    return vixAdjustment * breadthAdjustment;
+    // Ensure the final adjustment is within bounds
+    return Math.max(0.5, Math.min(1.5, vixAdjustment * breadthAdjustment));
   }
 
   /**
@@ -111,7 +112,11 @@ export class RiskManager {
     const baseDrawdown = marketData.vix / 20; // Normalize VIX
     const trendFactor = marketData.adx ? marketData.adx / 25 : 1;
     
-    return Math.min(0.25, baseDrawdown * trendFactor); // Cap at 25%
+    // Ensure different drawdown values for different trend strengths
+    const adjustedDrawdown = baseDrawdown * trendFactor;
+    
+    // Cap at 25% but ensure it's not too small
+    return Math.min(0.25, Math.max(0.1, adjustedDrawdown));
   }
 
   /**

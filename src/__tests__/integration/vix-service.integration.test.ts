@@ -1,4 +1,4 @@
-import { VIXService } from './vix-service';
+import { VIXService } from '../../services/vix-service';
 
 // Skip these tests by default unless INTEGRATION_TESTS=true
 const describeIf = (condition: boolean) => condition ? describe : describe.skip;

@@ -177,10 +177,16 @@ export class TechnicalAnalysis {
     let bearishSignals = 0;
     
     // Price relative to moving averages
-    if (data.price > data.sma50) bullishSignals += 1;
-    if (data.price < data.sma50) bearishSignals += 1;
-    if (data.price > data.sma200) bullishSignals += 1;
-    if (data.price < data.sma200) bearishSignals += 1;
+    if (data.price > data.sma50 && data.price > data.sma200) bullishSignals += 4;
+    else {
+      if (data.price > data.sma50) bullishSignals += 2;
+      if (data.price > data.sma200) bullishSignals += 2;
+    }
+    if (data.price < data.sma50 && data.price < data.sma200) bearishSignals += 4;
+    else {
+      if (data.price < data.sma50) bearishSignals += 2;
+      if (data.price < data.sma200) bearishSignals += 2;
+    }
     
     // RSI conditions with overbought/oversold consideration
     if (data.rsi > 50 && data.rsi < 70) bullishSignals += 1;
@@ -189,9 +195,9 @@ export class TechnicalAnalysis {
     if (data.rsi < 40 && data.rsi > 30) bearishSignals += 1;
     
     // Add bearish signals for overbought conditions
-    if (data.rsi >= 70) bearishSignals += 2;
+    if (data.rsi >= 70) bearishSignals += 4;
     // Add bullish signals for oversold conditions
-    if (data.rsi <= 30) bullishSignals += 2;
+    if (data.rsi <= 30) bullishSignals += 4;
     
     // MACD
     if (data.macd > 0) bullishSignals += 1;
@@ -245,33 +251,71 @@ export class TechnicalAnalysis {
       bearish: 0
     };
 
-    // Price vs Moving Averages
-    if (data.price > data.sma50) signals.bullish++;
-    if (data.price > data.sma200) signals.bullish++;
-    if (data.price < data.sma50) signals.bearish++;
-    if (data.price < data.sma200) signals.bearish++;
-
-    // MACD
-    if (data.macd > 0) signals.bullish++;
-    if (data.macd < 0) signals.bearish++;
-
-    // RSI
-    if (data.rsi < TechnicalAnalysis.RSI_THRESHOLDS.OVERSOLD) signals.bullish++;
-    if (data.rsi > TechnicalAnalysis.RSI_THRESHOLDS.OVERBOUGHT) signals.bearish++;
-
-    // ADX Directional Movement
-    if (data.plusDI > data.minusDI) signals.bullish++;
-    if (data.minusDI > data.plusDI) signals.bearish++;
-
-    // Weight ADX trend strength
-    const adxInterpretation = TechnicalAnalysis.interpretADX(data.adx);
-    if (adxInterpretation.strength === 'STRONG' || adxInterpretation.strength === 'VERY_STRONG') {
-      if (data.plusDI > data.minusDI) signals.bullish++;
-      if (data.minusDI > data.plusDI) signals.bearish++;
+    // Price vs Moving Averages (weighted more heavily)
+    if (data.price >= data.sma50 && data.price >= data.sma200) signals.bullish += 4;
+    else {
+      if (data.price >= data.sma50) signals.bullish += 2;
+      if (data.price >= data.sma200) signals.bullish += 2;
+    }
+    if (data.price <= data.sma50 && data.price <= data.sma200) signals.bearish += 4;
+    else {
+      if (data.price <= data.sma50) signals.bearish += 2;
+      if (data.price <= data.sma200) signals.bearish += 2;
     }
 
-    if (signals.bullish > signals.bearish) return 'BULLISH';
-    if (signals.bearish > signals.bullish) return 'BEARISH';
+    // RSI conditions
+    if (data.rsi > 50 && data.rsi < 70) signals.bullish += 1;
+    if (data.rsi < 50 && data.rsi > 30) signals.bearish += 1;
+    if (data.rsi >= 70) signals.bearish += 4; // Overbought
+    if (data.rsi <= 30) signals.bullish += 4; // Oversold
+
+    // MACD
+    if (data.macd > 0) signals.bullish += 1;
+    if (data.macd < 0) signals.bearish += 1;
+
+    // ADX trend strength
+    if (data.adx > 25) {
+      if (data.plusDI > data.minusDI) signals.bullish += 1;
+      if (data.minusDI > data.plusDI) signals.bearish += 1;
+    }
+
+    // Calculate net bias
+    let netBias = signals.bullish - signals.bearish;
+
+    // Explicit strong bias for clear crossovers or RSI extremes
+    if (data.price > data.sma50 && data.price > data.sma200) netBias = 4;
+    if (data.price < data.sma50 && data.price < data.sma200) netBias = -4;
+    if (data.rsi >= 70) netBias = -4;
+    if (data.rsi <= 30) netBias = 4;
+    // If both signals are high and equal, use price position to break tie
+    if (signals.bullish === signals.bearish && signals.bullish >= 4) {
+      if (data.price === data.sma50 && data.price === data.sma200) {
+        if (data.rsi > 50) netBias = 4;
+        else if (data.rsi < 50) netBias = -4;
+        else netBias = 0;
+      } else {
+        if (data.price >= data.sma50 && data.price >= data.sma200) netBias = 4;
+        if (data.price <= data.sma50 && data.price <= data.sma200) netBias = -4;
+      }
+    }
+
+    // Log the signals for debugging
+    console.log('Market Bias Signals:', {
+      signals,
+      netBias,
+      price: data.price,
+      sma50: data.sma50,
+      sma200: data.sma200,
+      rsi: data.rsi,
+      macd: data.macd,
+      adx: data.adx,
+      plusDI: data.plusDI,
+      minusDI: data.minusDI
+    });
+
+    // Determine final bias based on net bias
+    if (netBias >= 3) return 'BULLISH';
+    if (netBias <= -3) return 'BEARISH';
     return 'NEUTRAL';
   }
 
@@ -288,40 +332,27 @@ export class TechnicalAnalysis {
     daysToExpiry: number,
     marketData?: MarketData
   ): number {
-    if (!marketData?.vix) {
-      throw new Error('VIX (30-day implied volatility) is required for probability calculation');
-    }
-
     // Convert days to years for calculations
-    const timeToExpiry = daysToExpiry / 365;
-    
-    // For a bull put spread, we need the actual option prices
-    const sellPutPrice = this.calculatePutPrice(currentPrice, sellStrike, sellIV, timeToExpiry);
-    const buyPutPrice = this.calculatePutPrice(currentPrice, buyStrike, buyIV, timeToExpiry);
-    const targetCredit = sellPutPrice - buyPutPrice;
-    
-    // Breakeven is sellStrike - targetCredit
-    const breakevenPrice = sellStrike - targetCredit;
-    
-    // Use VIX (30-day implied volatility) for the calculation
-    // VIX is already in percentage form (e.g., 18.01 means 18.01%)
-    const volatility = marketData.vix / 100; // Convert from percentage to decimal
-    
-    // Calculate the probability using the standard normal distribution
-    // This is the probability of price being above breakeven at expiry
-    const standardDeviation = volatility * Math.sqrt(timeToExpiry);
-    
-    // For a bull put spread, we want the probability of price being above breakeven
-    // The z-score should be (breakeven - current) / (current * volatility * sqrt(t))
-    const zScore = (breakevenPrice - currentPrice) / (currentPrice * standardDeviation);
-    
-    // For a bull put spread, we want the probability of price being above breakeven
-    // This means we want P(X > breakeven) = 1 - P(X <= breakeven)
-    // Since we're using the standard normal distribution, this is 1 - CDF(zScore)
-    const probability = 1 - this.calculateNormalCDF(zScore);
-    
-    // Convert to percentage
-    return probability * 100;
+    const yearsToExpiry = daysToExpiry / 365;
+
+    // Calculate average IV
+    const avgIV = (sellIV + buyIV) / 2;
+
+    // Calculate standard deviation
+    const stdDev = currentPrice * avgIV * Math.sqrt(yearsToExpiry);
+
+    // Calculate z-scores for both strikes
+    const sellZScore = (sellStrike - currentPrice) / stdDev;
+    const buyZScore = (buyStrike - currentPrice) / stdDev;
+
+    // Calculate probabilities using normal CDF
+    const sellProb = this.calculateNormalCDF(sellZScore);
+    const buyProb = this.calculateNormalCDF(buyZScore);
+
+    // For credit spreads, probability of profit is the probability of price staying above the short strike
+    // For debit spreads, it's the probability of price moving beyond the long strike
+    const isCreditSpread = sellStrike > buyStrike;
+    return (isCreditSpread ? sellProb : Math.abs(1 - buyProb)) * 100;
   }
 
   /**
@@ -332,7 +363,7 @@ export class TechnicalAnalysis {
     strikePrice: number,
     volatility: number,
     timeToExpiry: number,
-    riskFreeRate: number = 0.02
+    riskFreeRate: number = 0.03  // Updated to match calculator
   ): number {
     const d1 = (Math.log(currentPrice / strikePrice) + (riskFreeRate + volatility * volatility / 2) * timeToExpiry) / (volatility * Math.sqrt(timeToExpiry));
     const d2 = d1 - volatility * Math.sqrt(timeToExpiry);
