@@ -1,6 +1,7 @@
 import { Logger } from '../core/logger';
 import { ConfigService } from '../config/config';
 import { chromium, Browser } from 'playwright';
+import { YahooOptionChainResponse } from '../types/yahoo';
 
 export interface OptionsData {
   date: Date;
@@ -67,6 +68,15 @@ interface ProcessedOptions {
   put: { [strike: number]: OptionQuote };
 }
 
+interface YahooFinanceResponse {
+  optionChain?: {
+    result?: Array<{
+      options?: YahooOptionsForExpiration[];
+    }>;
+    error: null;
+  };
+}
+
 export class OptionsService {
   private config: ConfigService;
   private logger: Logger;
@@ -127,7 +137,7 @@ export class OptionsService {
       
       // Find the expiration date closest to target days
       const targetDate = new Date(today.getTime() + targetDaysToExpiry * 24 * 60 * 60 * 1000);
-      const expirationDates = this.extractExpirationDates(optionsData.options);
+      const expirationDates = this.extractExpirationDates(optionsData);
       
       if (!expirationDates || expirationDates.length === 0) {
         throw new Error(`No expiration date found within ${toleranceDays} days of target ${targetDaysToExpiry} days`);
@@ -146,7 +156,7 @@ export class OptionsService {
       }
 
       // Process options data for the closest expiration
-      const options = optionsData.options.find((opt: any) => {
+      const options = optionsData.optionChain.result[0].options.find((opt: any) => {
         const optDate = new Date(opt.expirationDate * 1000);
         return optDate.getTime() === closestExpiration.getTime();
       });
@@ -161,11 +171,11 @@ export class OptionsService {
 
         return {
           date: new Date(),
-          underlyingPrice: optionsData.underlyingPrice,
+          underlyingPrice: optionsData.optionChain.result[0].quote.regularMarketPrice,
           strikes: processedOptions,
           ivPercentile: 0, // This should be calculated by VIXService
           putCallRatio,
-          options: optionsData.options
+          options: optionsData.optionChain.result[0].options
         };
       } catch (error) {
         throw new Error('No valid options data found after processing');
@@ -179,7 +189,7 @@ export class OptionsService {
   /**
    * Fetch options data from Yahoo Finance using Playwright
    */
-  private async fetchOptionsData(retryCount = 0): Promise<any> {
+  private async fetchOptionsData(retryCount = 0): Promise<YahooOptionChainResponse> {
     const cacheKey = 'default';
     const cachedData = this.getCachedOptionsData(cacheKey);
     if (cachedData) {
@@ -189,34 +199,100 @@ export class OptionsService {
     let browser: Browser | null = null;
 
     try {
-      browser = await chromium.launch();
+      // Launch browser and create context
+      browser = await chromium.launch({
+        headless: false
+      });
       const context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
       });
       const page = await context.newPage();
 
-      // Set up response handler before navigation
+      // Navigate to Yahoo Finance options page
+      await page.goto('https://finance.yahoo.com/quote/SPY/options', {
+        waitUntil: 'domcontentloaded',
+        timeout: this.config.get('options.navigationTimeout', 30000)
+      });
+
+      // Only set up response handler after successful navigation
       let optionsResponse: any = null;
-      let responsePromise = new Promise<void>((resolve, reject) => {
+      const responseTimeout = this.config.get('options.responseTimeout', 10000);
+      const responsePromise = new Promise<void>((resolve, reject) => {
         const timeoutId = setTimeout(() => {
           reject(new Error('Failed to capture options data response'));
-        }, this.config.get('options.responseTimeout', 30000));
+        }, responseTimeout);
 
         page.on('response', async (response) => {
           const url = response.url();
           if (url.includes('/v7/finance/options/SPY')) {
             try {
               const json = await response.json();
+              this.logger.debug('Received options response', { 
+                hasOptionChain: !!json?.optionChain,
+                hasResult: !!json?.optionChain?.result,
+                resultLength: json?.optionChain?.result?.length
+              });
+              
               optionsResponse = json;
               
-              if (!optionsResponse?.optionChain?.result?.[0]) {
+              // Validate response structure
+              if (!optionsResponse?.optionChain) {
+                this.logger.error(
+                  'Invalid response: Missing optionChain',
+                  new Error('Missing optionChain'),
+                  { responseData: JSON.stringify(json) }
+                );
                 clearTimeout(timeoutId);
-                reject(new Error('Invalid Yahoo Finance options data format'));
+                reject(new Error('Invalid Yahoo Finance options data format: Missing optionChain'));
+                return;
+              }
+
+              if (!optionsResponse.optionChain.result || !Array.isArray(optionsResponse.optionChain.result)) {
+                this.logger.error(
+                  'Invalid response: Missing or invalid result array',
+                  new Error('Invalid result array'),
+                  { responseData: JSON.stringify(json) }
+                );
+                clearTimeout(timeoutId);
+                reject(new Error('Invalid Yahoo Finance options data format: Missing result array'));
+                return;
+              }
+
+              if (optionsResponse.optionChain.result.length === 0) {
+                this.logger.error(
+                  'Invalid response: Empty result array',
+                  new Error('Empty result array'),
+                  { responseData: JSON.stringify(json) }
+                );
+                clearTimeout(timeoutId);
+                reject(new Error('Invalid Yahoo Finance options data format: Empty result array'));
                 return;
               }
 
               const result = optionsResponse.optionChain.result[0];
-              if (!result.options || !Array.isArray(result.options) || result.options.length === 0) {
+              this.logger.debug('Processing result', {
+                hasOptions: !!result.options,
+                optionsLength: result.options?.length,
+                hasQuote: !!result.quote
+              });
+
+              if (!result.options || !Array.isArray(result.options)) {
+                this.logger.error(
+                  'Invalid response: Missing or invalid options array',
+                  new Error('Invalid options array'),
+                  { resultData: JSON.stringify(result) }
+                );
+                clearTimeout(timeoutId);
+                reject(new Error('Invalid Yahoo Finance options data format: Missing options array'));
+                return;
+              }
+
+              if (result.options.length === 0) {
+                this.logger.error(
+                  'Invalid response: Empty options array',
+                  new Error('Empty options array'),
+                  { resultData: JSON.stringify(result) }
+                );
                 clearTimeout(timeoutId);
                 reject(new Error('No options data found in response'));
                 return;
@@ -225,53 +301,26 @@ export class OptionsService {
               clearTimeout(timeoutId);
               resolve();
             } catch (e) {
+              const error = e instanceof Error ? e : new Error(String(e));
+              this.logger.error('Error processing response', error);
               clearTimeout(timeoutId);
-              reject(e);
+              reject(error);
             }
           }
         });
       });
 
-      // Navigate to Yahoo Finance options page
-      await page.goto('https://finance.yahoo.com/quote/SPY/options', {
-        waitUntil: 'domcontentloaded',
-        timeout: this.config.get('options.navigationTimeout', 30000)
-      });
-
       // Click the date button to open the listbox
-      await page.click('button.tertiary-btn.fin-size-small.menuBtn[data-type="date"]', { 
-        timeout: this.config.get('options.clickTimeout', 10000) 
+      await page.click('button[data-test="date-selector"]', {
+        timeout: this.config.get('options.clickTimeout', 5000)
       });
 
-      // Wait for the date options to be available
-      await page.waitForSelector('div[role="option"]', { 
-        timeout: this.config.get('options.selectorTimeout', 10000) 
+      // Wait for the listbox to appear
+      await page.waitForSelector('div[role="listbox"]', {
+        timeout: this.config.get('options.selectorTimeout', 5000)
       });
 
-      // Calculate target date (25 days from now)
-      const today = new Date();
-      const targetDate = new Date(today.getTime() + 25 * 24 * 60 * 60 * 1000);
-
-      // Get all available dates and find the closest to target
-      const closestDateTimestamp = await page.evaluate((targetTimestamp) => {
-        const options = Array.from(document.querySelectorAll('div[role="option"]'));
-        if (options.length === 0) {
-          throw new Error('No date options found');
-        }
-        return options.reduce((closest, current) => {
-          const currentTimestamp = parseInt(current.getAttribute('data-value') || '0');
-          const currentDiff = Math.abs(currentTimestamp - targetTimestamp);
-          const closestDiff = Math.abs(parseInt(closest.getAttribute('data-value') || '0') - targetTimestamp);
-          return currentDiff < closestDiff ? current : closest;
-        }).getAttribute('data-value');
-      }, targetDate.getTime() / 1000);
-
-      // Click the closest date
-      await page.click(`div[role="option"][data-value="${closestDateTimestamp}"]`, { 
-        timeout: this.config.get('options.clickTimeout', 10000) 
-      });
-
-      // Wait for the options data to load
+      // Wait for the response
       await responsePromise;
 
       // Cache the response
@@ -279,14 +328,7 @@ export class OptionsService {
 
       return optionsResponse;
     } catch (error) {
-      this.logger.error('Error fetching options data:', error as Error);
-      
-      // Retry logic
-      if (retryCount < 3) {
-        this.logger.debug(`Retrying fetchOptionsData (attempt ${retryCount + 1})`);
-        return this.fetchOptionsData(retryCount + 1);
-      }
-      
+      this.logger.error('Error fetching options data', error as Error);
       throw error;
     } finally {
       if (browser) {
@@ -296,19 +338,44 @@ export class OptionsService {
   }
 
   /**
-   * Extract expiration dates from options data
+   * Extract expiration dates from YahooOptionChainResponse
    */
-  private extractExpirationDates(options: any[]): Date[] {
-    const dates = options
+  private extractExpirationDates(response: YahooOptionChainResponse): Date[] {
+    // Validate the response structure
+    if (!response?.optionChain?.result?.[0]?.options) {
+      this.logger.warn('Invalid Yahoo Finance response structure for expiration extraction', {
+        hasOptionChain: !!response?.optionChain,
+        hasResult: !!response?.optionChain?.result,
+        resultLength: response?.optionChain?.result?.length,
+        hasOptions: !!response?.optionChain?.result?.[0]?.options
+      });
+      return [];
+    }
+
+    const optionsArr = response.optionChain.result[0].options;
+    if (!Array.isArray(optionsArr) || optionsArr.length === 0) {
+      this.logger.warn('No options data available after extraction');
+      return [];
+    }
+
+    const dates = optionsArr
       .map(option => {
-        if (!option.expirationDate) return null;
-        const timestamp = typeof option.expirationDate === 'number' 
-          ? option.expirationDate * 1000 
+        if (!option.expirationDate) {
+          this.logger.debug('Option missing expirationDate:', JSON.stringify(option));
+          return null;
+        }
+        const timestamp = typeof option.expirationDate === 'number'
+          ? option.expirationDate * 1000
           : new Date(option.expirationDate).getTime();
-        return isNaN(timestamp) ? null : new Date(timestamp);
+        if (isNaN(timestamp)) {
+          this.logger.debug('Invalid timestamp for option:', JSON.stringify(option));
+          return null;
+        }
+        return new Date(timestamp);
       })
       .filter((date): date is Date => date !== null && date.getTime() > 0);
 
+    this.logger.debug('Extracted dates:', dates.map(d => d.toISOString()));
     return dates;
   }
 

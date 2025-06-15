@@ -146,3 +146,11 @@ export interface ProcessedOptions {
     call: { [strike: number]: OptionQuote };
     put: { [strike: number]: OptionQuote };
 }
+
+// Yahoo API OptionChain Root Response
+export interface YahooOptionChainResponse {
+    optionChain: {
+        result: YahooOptionChainResult[];
+    };
+    error: any;
+}
