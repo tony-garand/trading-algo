@@ -22,10 +22,10 @@ class StrategyRunner {
    */
   async getCurrentStrategy(): Promise<void> {
     try {
-      const marketDataService = this.container.get<MarketDataService>('marketDataService');
+      // const marketDataService = this.container.get<MarketDataService>('marketDataService');
       
-      // Fetch current market data
-      const marketData = await marketDataService.fetchCurrentMarketData();
+      // // Fetch current market data
+      // const marketData = await marketDataService.fetchCurrentMarketData();
       
       // Get strategy recommendation
       const recommendation = await this.analyzer.getCurrentRecommendation();

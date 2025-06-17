@@ -200,9 +200,7 @@ export class OptionsService {
 
     try {
       // Launch browser and create context
-      browser = await chromium.launch({
-        headless: false
-      });
+      browser = await chromium.launch();
       const context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
       });
@@ -311,7 +309,7 @@ export class OptionsService {
       });
 
       // Click the date button to open the listbox
-      await page.click('button[data-test="date-selector"]', {
+      await page.click('button[data-type="date"]', {
         timeout: this.config.get('options.clickTimeout', 5000)
       });
 
@@ -319,6 +317,42 @@ export class OptionsService {
       await page.waitForSelector('div[role="listbox"]', {
         timeout: this.config.get('options.selectorTimeout', 5000)
       });
+
+      // Get all expiration dates and find the closest to 25 days
+      const targetDate = new Date();
+      targetDate.setDate(targetDate.getDate() + 25);
+
+      const expirationOptions = await page.$$('div[role="listbox"] div[role="option"]');
+      let closestOption = null;
+      let minDiff = Infinity;
+
+      for (const option of expirationOptions) {
+        const dateText = await option.textContent();
+        if (!dateText) continue;
+
+        // Extract the date from the text (format: "MMM DD, YYYY")
+        const dateMatch = dateText.match(/([A-Za-z]+)\s+(\d+),\s+(\d+)/);
+        if (!dateMatch) continue;
+
+        const [, month, day, year] = dateMatch;
+        const optionDate = new Date(`${month} ${day}, ${year}`);
+        const diff = Math.abs(optionDate.getTime() - targetDate.getTime());
+
+        if (diff < minDiff) {
+          minDiff = diff;
+          closestOption = option;
+        }
+      }
+
+      if (closestOption) {
+        await closestOption.click();
+        this.logger.debug('Selected expiration date closest to 25 days', {
+          targetDate: targetDate.toISOString(),
+          selectedDate: await closestOption.textContent()
+        });
+      } else {
+        this.logger.warn('Could not find suitable expiration date');
+      }
 
       // Wait for the response
       await responsePromise;
