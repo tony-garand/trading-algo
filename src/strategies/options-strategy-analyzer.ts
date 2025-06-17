@@ -419,11 +419,21 @@ export class OptionsStrategyAnalyzer {
         }
 
         case 'IRON_CONDOR': {
-          // For iron condor, we want to sell both a put spread and a call spread
-          const putSellStrike = Math.round(currentPrice * 0.98); // 2% OTM
-          const putBuyStrike = Math.round(currentPrice * 0.96); // 4% OTM
-          const callSellStrike = Math.round(currentPrice * 1.02); // 2% OTM
-          const callBuyStrike = Math.round(currentPrice * 1.04); // 4% OTM
+          // Calculate dynamic strike distances based on volatility and market conditions
+          const volatilityMultiplier = marketData.ivPercentile / 50; // Normalize to 1.0 at 50th percentile
+          const baseDistance = currentPrice * 0.02; // Base 2% distance
+          
+          // Adjust distances based on volatility
+          const putSellDistance = baseDistance * volatilityMultiplier;
+          const putBuyDistance = putSellDistance * 1.5; // Wider spread for puts
+          const callSellDistance = baseDistance * volatilityMultiplier;
+          const callBuyDistance = callSellDistance * 1.5; // Wider spread for calls
+          
+          // Calculate target strikes
+          const putSellStrike = Math.round(currentPrice - putSellDistance);
+          const putBuyStrike = Math.round(currentPrice - putBuyDistance);
+          const callSellStrike = Math.round(currentPrice + callSellDistance);
+          const callBuyStrike = Math.round(currentPrice + callBuyDistance);
           
           // Find closest available strikes for puts
           const putSell = putStrikes.reduce((prev, curr) => 
@@ -441,18 +451,26 @@ export class OptionsStrategyAnalyzer {
             Math.abs(curr - callBuyStrike) < Math.abs(prev - callBuyStrike) ? curr : prev
           );
           
+          // Calculate credit based on actual option prices from the options data
+          const putSellPrice = optionsData.strikes.put[putSell]?.bid || 0;
+          const putBuyPrice = optionsData.strikes.put[putBuy]?.ask || 0;
+          const callSellPrice = optionsData.strikes.call[callSell]?.bid || 0;
+          const callBuyPrice = optionsData.strikes.call[callBuy]?.ask || 0;
+          
           // Calculate total credit from both spreads
-          const putSpreadCredit = Math.abs(putSell - putBuy) * 0.4;
-          const callSpreadCredit = Math.abs(callSell - callBuy) * 0.4;
-          targetCredit = putSpreadCredit + callSpreadCredit;
+          const putSpreadCredit = putSellPrice - putBuyPrice;
+          const callSpreadCredit = callSellPrice - callBuyPrice;
+          const targetCredit = putSpreadCredit + callSpreadCredit;
           
-          // Calculate max loss (width of wider spread)
-          maxLoss = Math.max(
-            Math.abs(putSell - putBuy),
-            Math.abs(callSell - callBuy)
-          ) - targetCredit;
+          // Calculate max loss for each spread
+          const putSpreadWidth = Math.abs(putSell - putBuy);
+          const callSpreadWidth = Math.abs(callSell - callBuy);
           
-          probabilityOfProfit = TechnicalAnalysis.calculateProbabilityOfProfit(
+          // Calculate max loss (width of wider spread minus credit)
+          const maxLoss = Math.max(putSpreadWidth, callSpreadWidth) - targetCredit;
+          
+          // Calculate probability of profit using both spreads
+          const putProb = TechnicalAnalysis.calculateProbabilityOfProfit(
             currentPrice,
             putSell,
             putBuy,
@@ -460,6 +478,18 @@ export class OptionsStrategyAnalyzer {
             marketData.ivPercentile,
             daysToExpiration
           );
+          
+          const callProb = TechnicalAnalysis.calculateProbabilityOfProfit(
+            currentPrice,
+            callSell,
+            callBuy,
+            marketData.ivPercentile,
+            marketData.ivPercentile,
+            daysToExpiration
+          );
+          
+          // Use the higher probability as the overall probability of profit
+          const probabilityOfProfit = Math.max(putProb, callProb);
 
           return {
             strategy,
