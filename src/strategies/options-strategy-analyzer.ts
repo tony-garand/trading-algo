@@ -457,14 +457,14 @@ export class OptionsStrategyAnalyzer {
           const callSellPrice = optionsData.strikes.call[callSell]?.bid || 0;
           const callBuyPrice = optionsData.strikes.call[callBuy]?.ask || 0;
           
-          // Calculate total credit from both spreads
-          const putSpreadCredit = putSellPrice - putBuyPrice;
-          const callSpreadCredit = callSellPrice - callBuyPrice;
+          // Calculate total credit from both spreads (multiply by 100 for options contract)
+          const putSpreadCredit = (putSellPrice - putBuyPrice) * 100;
+          const callSpreadCredit = (callSellPrice - callBuyPrice) * 100;
           const targetCredit = putSpreadCredit + callSpreadCredit;
           
           // Calculate max loss for each spread
-          const putSpreadWidth = Math.abs(putSell - putBuy);
-          const callSpreadWidth = Math.abs(callSell - callBuy);
+          const putSpreadWidth = Math.abs(putSell - putBuy) * 100; // Multiply by 100 for options contract
+          const callSpreadWidth = Math.abs(callSell - callBuy) * 100; // Multiply by 100 for options contract
           
           // Calculate max loss (width of wider spread minus credit)
           const maxLoss = Math.max(putSpreadWidth, callSpreadWidth) - targetCredit;
