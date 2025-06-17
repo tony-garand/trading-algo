@@ -25,6 +25,12 @@ export interface StrategyParameters {
   expiryDate: Date;
   breakevenPrice: number;
   probabilityOfProfit: number;
+  position: 'LONG' | 'SHORT' | 'NEUTRAL';
+  // For iron condor
+  putSellStrike?: number;
+  putBuyStrike?: number;
+  callSellStrike?: number;
+  callBuyStrike?: number;
 }
 
 export interface StrategyRecommendation {
@@ -419,27 +425,58 @@ export class OptionsStrategyAnalyzer {
           const callSellStrike = Math.round(currentPrice * 1.02); // 2% OTM
           const callBuyStrike = Math.round(currentPrice * 1.04); // 4% OTM
           
-          // Find closest available strikes
-          sellStrike = putStrikes.reduce((prev, curr) => 
+          // Find closest available strikes for puts
+          const putSell = putStrikes.reduce((prev, curr) => 
             Math.abs(curr - putSellStrike) < Math.abs(prev - putSellStrike) ? curr : prev
           );
-          buyStrike = putStrikes.reduce((prev, curr) => 
+          const putBuy = putStrikes.reduce((prev, curr) => 
             Math.abs(curr - putBuyStrike) < Math.abs(prev - putBuyStrike) ? curr : prev
           );
+
+          // Find closest available strikes for calls
+          const callSell = callStrikes.reduce((prev, curr) => 
+            Math.abs(curr - callSellStrike) < Math.abs(prev - callSellStrike) ? curr : prev
+          );
+          const callBuy = callStrikes.reduce((prev, curr) => 
+            Math.abs(curr - callBuyStrike) < Math.abs(prev - callBuyStrike) ? curr : prev
+          );
           
-          buyOptionType = 'PUT';
-          sellOptionType = 'PUT';
-          targetCredit = Math.abs(sellStrike - buyStrike) * 0.4; // Target 40% of max loss
-          maxLoss = Math.abs(sellStrike - buyStrike) - targetCredit;
+          // Calculate total credit from both spreads
+          const putSpreadCredit = Math.abs(putSell - putBuy) * 0.4;
+          const callSpreadCredit = Math.abs(callSell - callBuy) * 0.4;
+          targetCredit = putSpreadCredit + callSpreadCredit;
+          
+          // Calculate max loss (width of wider spread)
+          maxLoss = Math.max(
+            Math.abs(putSell - putBuy),
+            Math.abs(callSell - callBuy)
+          ) - targetCredit;
+          
           probabilityOfProfit = TechnicalAnalysis.calculateProbabilityOfProfit(
             currentPrice,
-            sellStrike,
-            buyStrike,
+            putSell,
+            putBuy,
             marketData.ivPercentile,
             marketData.ivPercentile,
             daysToExpiration
           );
-          break;
+
+          return {
+            strategy,
+            position: 'SHORT',
+            putSellStrike: putSell,
+            putBuyStrike: putBuy,
+            callSellStrike: callSell,
+            callBuyStrike: callBuy,
+            targetCredit,
+            maxLoss,
+            maxProfit: targetCredit,
+            maxReturnOnRisk: (targetCredit / maxLoss) * 100,
+            daysToExpiration,
+            expiryDate,
+            breakevenPrice: currentPrice,
+            probabilityOfProfit
+          };
         }
 
         case 'CALENDAR_SPREAD': {
@@ -471,6 +508,7 @@ export class OptionsStrategyAnalyzer {
           // Return a default parameter object for no trade
           return {
             strategy: 'NO_TRADE',
+            position: 'NEUTRAL',
             targetCredit: 0,
             maxLoss: 0,
             maxProfit: 0,
@@ -505,6 +543,7 @@ export class OptionsStrategyAnalyzer {
 
       return {
         strategy,
+        position: strategy.includes('BULL') ? 'LONG' : 'SHORT',
         buyStrike,
         sellStrike,
         buyOptionType,
@@ -529,71 +568,6 @@ export class OptionsStrategyAnalyzer {
    */
   public updateAccount(newAccountInfo: Partial<AccountInfo>): void {
     this.accountInfo = { ...this.accountInfo, ...newAccountInfo };
-  }
-
-  /**
-   * Get formatted recommendation string
-   */
-  private getFormattedRecommendation(recommendation: StrategyRecommendation): string {
-    const {
-      strategy,
-      parameters,
-      reasoning,
-      riskLevel,
-      signalStrength,
-      positionSize,
-      expectedWinRate,
-      maxRisk
-    } = recommendation;
-
-    // Log the values for debugging
-    console.log('Strategy Parameters in getFormattedRecommendation:', {
-      targetCredit: parameters.targetCredit,
-      maxProfit: parameters.maxProfit,
-      maxLoss: parameters.maxLoss,
-      maxReturnOnRisk: parameters.maxReturnOnRisk
-    });
-
-    const output = `
-Strategy: ${strategy}
-Position Size: $${positionSize.toFixed(2)}
-Expected Win Rate: ${expectedWinRate}%
-Risk Level: ${riskLevel}
-Signal Strength: ${signalStrength.toFixed(1)}/5
-Max Risk: $${maxRisk.toFixed(2)}
-
-Strategy Parameters:
-- Target Credit: $${parameters.targetCredit.toFixed(2)}
-- Max Profit: $${parameters.maxProfit.toFixed(2)}
-- Max Loss: $${parameters.maxLoss.toFixed(2)}
-- Risk/Profit Ratio: ${(parameters.maxProfit / parameters.maxLoss).toFixed(2)}
-- Max Return on Risk: ${parameters.maxReturnOnRisk.toFixed(1)}%
-
-Strike Prices:
-- Sell ${parameters.sellOptionType} at $${parameters.sellStrike}
-- Buy ${parameters.buyOptionType} at $${parameters.buyStrike}
-- Breakeven Price: $${parameters.breakevenPrice.toFixed(2)}
-
-Expiration:
-- Days to Expiration: ${parameters.daysToExpiration}
-- Expiry Date: ${parameters.expiryDate.toLocaleDateString()}
-
-Reasoning:
-${reasoning}
-`;
-
-    // Log the final output for debugging
-    console.log('Final Output:', output);
-
-    return output;
-  }
-
-  private formatExpiryDate(expiryDate: Date): string {
-    const expiryTimestamp = expiryDate.getTime() / 1000; // Convert to seconds
-    const expiryTimestampMs = expiryTimestamp * 1000;
-    const estDate = toZonedTime(expiryTimestampMs, 'America/New_York');
-    const expiryDateString = format(estDate, 'yyyy-MM-dd', { timeZone: 'America/New_York' });
-    return expiryDateString;
   }
 }
 
